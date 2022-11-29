@@ -596,6 +596,7 @@ def split(xmlfile, groups, outdir=None):
     # the names and format of temporary products
     prod_tmp = {}
     prod_tmp_format = {}
+    dependencies={}
     for position, group in enumerate(groups):
         node_lookup = {}
         log.debug('creating new workflow for group {}'.format(group))
@@ -608,7 +609,7 @@ def split(xmlfile, groups, outdir=None):
                 sources = []
                 resetSuccessorSource = False
             elif isinstance(sources, list):
-                resetSuccessorSource = False
+                resetSuccessorSource = True #FIXME MM False
             else:
                 resetSuccessorSource = True
                 sources = [sources]
@@ -632,7 +633,6 @@ def split(xmlfile, groups, outdir=None):
                 newnode = new.insert_node(node.copy(), void=False,
                                           resetSuccessorSource=False)
             node_lookup[newnode.id] = id_old
-            
             if not resetSuccessorSource:
                 newnode.source = reset
         
@@ -667,6 +667,7 @@ def split(xmlfile, groups, outdir=None):
         outname = os.path.join(outdir, '{}_tmp{}.xml'.format(basename, position))
         new.write(outname)
         outlist.append(outname)
+
     return outlist
 
 
@@ -1982,3 +1983,4 @@ def dem_parametrize(workflow=None, node=None, demName='SRTM 1Sec HGT', externalD
     # download the EGM lookup table if necessary
     if dempar['externalDEMApplyEGM']:
         get_egm_lookup(geoid='EGM96', software='SNAP')
+
