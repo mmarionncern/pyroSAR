@@ -1242,12 +1242,15 @@ def insar_coherence(infiles, swaths=["IW1","IW2","IW3"], polarizations='all', t_
     #check s1 frame compatibility
     # second image has to be the first image used for coherence estimation
     delta_t = dt.datetime.strptime(id_1.start,"%Y%m%dT%H%M%S")-dt.datetime.strptime(id_2.start,"%Y%m%dT%H%M%S")
+    delta_day = (dt.datetime.strptime(id_1.start,"%Y%m%dT%H%M%S")-dt.datetime.strptime(id_2.start,"%Y%m%dT%H%M%S")).days
+    delta_sec_p = abs((dt.datetime.strptime(id_1.start,"%Y%m%dT%H%M%S")-dt.datetime.strptime(id_2.start,"%Y%m%dT%H%M%S")).seconds)
+    delta_sec_m = abs((dt.datetime.strptime(id_2.start,"%Y%m%dT%H%M%S")-dt.datetime.strptime(id_1.start,"%Y%m%dT%H%M%S")).seconds)
     if id_1.orbitNumber_rel!=id_2.orbitNumber_rel or\
        id_1.orbit!=id_2.orbit or\
-       id_1.sensor!=id_2.sensor or\
-       delta_t.days%12!=0 or\
-       min(86400-delta_t.seconds, delta_t.seconds)>10:
-        raise RuntimeError(f"Invalid S1 frame comparison, wrong geographical matching")
+       id_1.sensor!=id_2.sensor or \
+       delta_day!=12 and not (delta_day==11 and delta_sec_p>86345) or \
+       min(delta_sec_p, delta_sec_m)>10:
+       raise RuntimeError(f"Invalid S1 frame comparison, wrong geographical matching")
     ######################
     if isinstance(polarizations, str):
         if polarizations == 'all':
