@@ -1248,8 +1248,13 @@ def insar_coherence(infiles, swaths=["IW1","IW2","IW3"], polarizations='all', t_
     if id_1.orbitNumber_rel!=id_2.orbitNumber_rel or\
        id_1.orbit!=id_2.orbit or\
        id_1.sensor!=id_2.sensor or \
-       delta_day!=12 and not (delta_day==11 and delta_sec_p>86345) or \
+       (delta_day!=12 and not (delta_day==11 and delta_sec_p>86345)) or \
        min(delta_sec_p, delta_sec_m)>10:
+       import logging
+       logger = logging.getLogger("my_logger")
+       logger.error(delta_day)
+       logger.error(delta_sec_p)
+       logger.error(delta_sec_m)
        raise RuntimeError(f"Invalid S1 frame comparison, wrong geographical matching")
     ######################
     if isinstance(polarizations, str):
