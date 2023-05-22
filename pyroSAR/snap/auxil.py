@@ -1464,6 +1464,7 @@ def erode_edges(src, only_boundary=False, connectedness=4, pixels=1):
     -------
 
     """
+    log.info("bliblou")
     images = None
     if src.endswith('.dim'):
         workdir = src.replace('.dim', '.data')
@@ -1475,30 +1476,32 @@ def erode_edges(src, only_boundary=False, connectedness=4, pixels=1):
     else:
         raise RuntimeError("'src' must be either a file in BEAM-DIMAP format (extension '.dim'), "
                            "an ENVI file with extension *.img, or a directory.")
-    
+    log.info("bliblou 1")
     if images is None:
         images = [x for x in finder(workdir, ['*.img'], recursive=False)
                   if 'layoverShadowMask' not in x]
     if len(images) == 0:
         raise RuntimeError("could not find any files with extension '.img'")
-    
+    log.info("bliblou 2")
     from scipy.ndimage import binary_erosion, generate_binary_structure, iterate_structure
-    
+    log.info("bliblou 3")
     if connectedness == 4:
         connectivity = 1
     elif connectedness == 8:
         connectivity = 2
     else:
         raise ValueError('connectedness must be either 4 or 8')
-    
+    log.info("bliblou 4")
     structure = generate_binary_structure(rank=2, connectivity=connectivity)
+    log.info("bliblou 5")
     if pixels > 1:
         structure = iterate_structure(structure=structure, iterations=pixels)
-    
+    log.info("bliblou 6")
     if workdir is not None:
         fname_mask = os.path.join(workdir, 'datamask.tif')
     else:
         fname_mask = os.path.join(os.path.dirname(src), 'datamask.tif')
+    log.info("bliblou 7")
     write_intermediates = False  # this is intended for debugging
     
     def erosion(src, dst, structure, only_boundary, write_intermediates=False):
