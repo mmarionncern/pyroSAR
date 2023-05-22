@@ -1217,6 +1217,8 @@ def insar_coherence(infiles, swaths=["IW1","IW2","IW3"], polarizations='all', t_
     if len(infiles)!=2:
         raise RuntimeError("Two files are mandatory to compute Insar coherence, less or more were provided")
     ids = identify_many(infiles, sortkey='start')
+    for id in ids:
+        print(ids.meta)
     id_1 = ids[0]
     id_2 = ids[1]
 
