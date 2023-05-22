@@ -464,9 +464,9 @@ def writer(xmlfile, outdir, basename_extensions=None,
         log.info(message.format('cleaning image edges and ' if clean_edges else ''))
         translateoptions = {'options': ['-q', '-co', 'INTERLEAVE=BAND', '-co', 'TILED=YES'],
                             'format': 'GTiff'}
-        
+        log.info("blibli")
         erode_edges(src=src, only_boundary=True, pixels=clean_edges_npixels)
-        
+        log.info("blabla")
         if src_format == 'BEAM-DIMAP':
             src = src.replace('.dim', '.data')
         for item in finder(src, ['*.img'], recursive=False):
@@ -503,13 +503,14 @@ def writer(xmlfile, outdir, basename_extensions=None,
                 nodata = 255
             else:
                 nodata = 0
+            log.info(nodata)
             translateoptions['noData'] = nodata
-            print("before gdal translation")
-            print(translateoptions)
-            print(item)
-            print(name_new)
+            log.info("before gdal translation")
+            log.info(translateoptions)
+            log.info(item)
+            log.info(name_new)
             gdal_translate(src=item, dst=name_new, **translateoptions)
-            print("before gdal translation")
+            log.info("before gdal translation")
     else:
         raise RuntimeError('The output file format must be ENVI or BEAM-DIMAP.')
     ###########################################################################
