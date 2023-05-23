@@ -1521,6 +1521,8 @@ def erode_edges(src, only_boundary=False, connectedness=4, pixels=1):
                     log.info("bliblou 13")
                     with vectorize(target=mask, reference=ref) as vec:
                         log.info("bliblou 14")
+                        log.info(mask)
+                        log.info(vec)
                         with boundary(vec, expression="value=1") as bounds:
                             log.info("bliblou 15")
                             with rasterize(vectorobject=bounds, reference=ref, nodata=None) as new:
