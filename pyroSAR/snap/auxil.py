@@ -1,7 +1,7 @@
 ###############################################################################
 # pyroSAR SNAP API tools
 
-# Copyright (c) 2017-2022, the pyroSAR Developers.
+# Copyright (c) 2017-2023, the pyroSAR Developers.
 
 # This file is part of the pyroSAR Project. It is subject to the
 # license terms in the LICENSE.txt file found in the top-level
@@ -504,7 +504,7 @@ def writer(xmlfile, outdir, basename_extensions=None,
             else:
                 nodata = 0
             translateoptions['noData'] = nodata
-            gdal_translate(item, name_new, translateoptions)
+            gdal_translate(src=item, dst=name_new, **translateoptions)
     else:
         raise RuntimeError('The output file format must be ENVI or BEAM-DIMAP.')
     ###########################################################################
@@ -1495,13 +1495,19 @@ def erode_edges(src, only_boundary=False, connectedness=4, pixels=1):
     write_intermediates = False  # this is intended for debugging
     
     def erosion(src, dst, structure, only_boundary, write_intermediates=False):
-        if not os.path.isfile(dst):
-            with Raster(src) as ref:
-                array = ref.array()
+        with Raster(src) as ref:
+            array = ref.array()
+            if not os.path.isfile(dst):
                 mask = array != 0
+                # do not perform erosion if data only contains nodata (mask == 1)
+                if len(mask[mask == 1]) == 0:
+                    ref.write(outname=dst, array=mask, dtype='Byte',
+                              options=['COMPRESS=DEFLATE'])
+                    return array, mask
                 if write_intermediates:
                     ref.write(dst.replace('.tif', '_init.tif'),
-                              array=mask, dtype='Byte')
+                              array=mask, dtype='Byte',
+                              options=['COMPRESS=DEFLATE'])
                 if only_boundary:
                     with vectorize(target=mask, reference=ref) as vec:
                         with boundary(vec, expression="value=1") as bounds:
@@ -1510,14 +1516,20 @@ def erode_edges(src, only_boundary=False, connectedness=4, pixels=1):
                                 if write_intermediates:
                                     vec.write(dst.replace('.tif', '_init_vectorized.gpkg'))
                                     bounds.write(dst.replace('.tif', '_boundary_vectorized.gpkg'))
-                                    new.write(outname=dst.replace('.tif', '_boundary.tif'), dtype='Byte')
+                                    new.write(outname=dst.replace('.tif', '_boundary.tif'),
+                                              dtype='Byte', options=['COMPRESS=DEFLATE'])
                 mask = binary_erosion(input=mask, structure=structure)
-                ref.write(outname=dst, array=mask, dtype='Byte')
-        else:
-            with Raster(dst) as ras:
-                mask = ras.array()
+                ref.write(outname=dst, array=mask, dtype='Byte',
+                          options=['COMPRESS=DEFLATE'])
+            else:
+                with Raster(dst) as ras:
+                    mask = ras.array()
         array[mask == 0] = 0
         return array, mask
+    
+    # make sure a backscatter image is used for creating the mask
+    backscatter = [x for x in images if re.search('^(?:Sig|Gam)ma0_', os.path.basename(x))]
+    images.insert(0, images.pop(images.index(backscatter[0])))
     
     mask = None
     for img in images:
@@ -1529,7 +1541,9 @@ def erode_edges(src, only_boundary=False, connectedness=4, pixels=1):
             with Raster(img) as ras:
                 array = ras.array()
             array[mask == 0] = 0
-        
+        # do not apply mask if it only contains 1 (valid data)
+        if len(mask[mask == 0]) == 0:
+            break
         ras = gdal.Open(img, GA_Update)
         band = ras.GetRasterBand(1)
         band.WriteArray(array)
@@ -1575,7 +1589,8 @@ def mli_parametrize(scene, spacing=None, rlks=None, azlks=None, **kwargs):
         image_geometry = scene.meta['image_geometry']
         incidence = scene.meta['incidence']
     except KeyError:
-        raise RuntimeError('This function does not yet support sensor {}'.format(scene.sensor))
+        msg = 'This function does not yet support {} products in {} format'
+        raise RuntimeError(msg.format(scene.sensor, scene.__class__.__name__))
     
     if rlks is None and azlks is None:
         if spacing is None:
@@ -1632,7 +1647,8 @@ def orb_parametrize(scene, formatName, allow_RES_OSV=True, **kwargs):
         orbitType = 'DORIS Precise VOR (ENVISAT) (Auto Download)'
     
     if formatName == 'SENTINEL-1':
-        match = scene.getOSV(osvType='POE', returnMatch=True)
+        osv_type = ['POE', 'RES'] if allow_RES_OSV else 'POE'
+        match = scene.getOSV(osvType=osv_type, returnMatch=True)
         if match is None and allow_RES_OSV:
             scene.getOSV(osvType='RES')
             orbitType = 'Sentinel Restituted (Auto Download)'
@@ -1754,7 +1770,7 @@ def geo_parametrize(spacing, t_srs, tc_method='Range-Doppler',
         the image band names to geocode; default None: geocode all incoming bands.
     spacing: int or float
         The target pixel spacing in meters.
-    t_srs: int, str or osr.SpatialReference
+    t_srs: int or str or osgeo.osr.SpatialReference
         A target geographic reference system in WKT, EPSG, PROJ4 or OPENGIS format.
         See function :func:`spatialist.auxil.crsConvert()` for details.
     demName: str
