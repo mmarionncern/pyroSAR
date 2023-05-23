@@ -1505,45 +1505,71 @@ def erode_edges(src, only_boundary=False, connectedness=4, pixels=1):
     write_intermediates = False  # this is intended for debugging
     
     def erosion(src, dst, structure, only_boundary, write_intermediates=False):
+        log.info("bliblou 8")
         if not os.path.isfile(dst):
             with Raster(src) as ref:
+                log.info("bliblou 9")
                 array = ref.array()
+                log.info("bliblou 10")
                 mask = array != 0
+                log.info("bliblou 11")
                 if write_intermediates:
                     ref.write(dst.replace('.tif', '_init.tif'),
                               array=mask, dtype='Byte')
+                    log.info("bliblou 12")
                 if only_boundary:
+                    log.info("bliblou 13")
                     with vectorize(target=mask, reference=ref) as vec:
+                        log.info("bliblou 14")
                         with boundary(vec, expression="value=1") as bounds:
+                            log.info("bliblou 15")
                             with rasterize(vectorobject=bounds, reference=ref, nodata=None) as new:
+                                log.info("bliblou 16")
                                 mask = new.array()
                                 if write_intermediates:
+                                    log.info("bliblou 17")
                                     vec.write(dst.replace('.tif', '_init_vectorized.gpkg'))
+                                    log.info("bliblou 18")
                                     bounds.write(dst.replace('.tif', '_boundary_vectorized.gpkg'))
+                                    log.info("bliblou 19")
                                     new.write(outname=dst.replace('.tif', '_boundary.tif'), dtype='Byte')
+                                    log.info("bliblou 20")
                 mask = binary_erosion(input=mask, structure=structure)
+                log.info("bliblou 21")
                 ref.write(outname=dst, array=mask, dtype='Byte')
+                log.info("bliblou 22")
         else:
             with Raster(dst) as ras:
+                log.info("bliblou a-1")
                 mask = ras.array()
+                log.info("bliblou a-2")
         array[mask == 0] = 0
+        log.info("bliblou a-3")
         return array, mask
-    
+    log.info("bliblou b-1")
     mask = None
     for img in images:
         if mask is None:
+            log.info("bliblou b-2")
             array, mask = erosion(src=img, dst=fname_mask,
                                   structure=structure, only_boundary=only_boundary,
                                   write_intermediates=write_intermediates)
+            log.info("bliblou b-3")
         else:
             with Raster(img) as ras:
+                log.info("bliblou b-4")
                 array = ras.array()
             array[mask == 0] = 0
-        
+            log.info("bliblou b-5")
+        log.info("bliblou c-1")
         ras = gdal.Open(img, GA_Update)
+        log.info("bliblou c-2")
         band = ras.GetRasterBand(1)
+        log.info("bliblou c-3")
         band.WriteArray(array)
+        log.info("bliblou c-4")
         band.FlushCache()
+        log.info("bliblou c-5")
         band = None
         ras = None
 
