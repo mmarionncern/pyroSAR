@@ -1507,6 +1507,7 @@ def erode_edges(src, only_boundary=False, connectedness=4, pixels=1):
     def erosion(src, dst, structure, only_boundary, write_intermediates=False):
         log.info("bliblou 8")
         if not os.path.isfile(dst):
+            log.info(src)
             with Raster(src) as ref:
                 log.info("bliblou 9")
                 array = ref.array()
