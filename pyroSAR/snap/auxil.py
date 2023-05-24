@@ -1525,6 +1525,7 @@ def erode_edges(src, only_boundary=False, connectedness=4, pixels=1):
                         log.info(ref)
                         log.info("bliblouuouou")
                         log.info(vec)
+                        log.info(vec.vector.GetLayerCount()
                         log.info("bliblouuouou")
                         log.info("flflflflf")
                         with boundary(vec, expression="value=1") as bounds:
