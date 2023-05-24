@@ -464,9 +464,8 @@ def writer(xmlfile, outdir, basename_extensions=None,
         log.info(message.format('cleaning image edges and ' if clean_edges else ''))
         translateoptions = {'options': ['-q', '-co', 'INTERLEAVE=BAND', '-co', 'TILED=YES'],
                             'format': 'GTiff'}
-        log.info("blibli")
+
         erode_edges(src=src, only_boundary=True, pixels=clean_edges_npixels)
-        log.info("blabla")
         if src_format == 'BEAM-DIMAP':
             src = src.replace('.dim', '.data')
         for item in finder(src, ['*.img'], recursive=False):
@@ -503,14 +502,9 @@ def writer(xmlfile, outdir, basename_extensions=None,
                 nodata = 255
             else:
                 nodata = 0
-            log.info(nodata)
+
             translateoptions['noData'] = nodata
-            log.info("before gdal translation")
-            log.info(translateoptions)
-            log.info(item)
-            log.info(name_new)
             gdal_translate(src=item, dst=name_new, **translateoptions)
-            log.info("before gdal translation")
     else:
         raise RuntimeError('The output file format must be ENVI or BEAM-DIMAP.')
     ###########################################################################
@@ -1464,7 +1458,7 @@ def erode_edges(src, only_boundary=False, connectedness=4, pixels=1):
     -------
 
     """
-    log.info("bliblou")
+
     images = None
     if src.endswith('.dim'):
         workdir = src.replace('.dim', '.data')
@@ -1476,108 +1470,75 @@ def erode_edges(src, only_boundary=False, connectedness=4, pixels=1):
     else:
         raise RuntimeError("'src' must be either a file in BEAM-DIMAP format (extension '.dim'), "
                            "an ENVI file with extension *.img, or a directory.")
-    log.info("bliblou 1")
+
     if images is None:
         images = [x for x in finder(workdir, ['*.img'], recursive=False)
                   if 'layoverShadowMask' not in x]
     if len(images) == 0:
         raise RuntimeError("could not find any files with extension '.img'")
-    log.info("bliblou 2")
+
     from scipy.ndimage import binary_erosion, generate_binary_structure, iterate_structure
-    log.info("bliblou 3")
+
     if connectedness == 4:
         connectivity = 1
     elif connectedness == 8:
         connectivity = 2
     else:
         raise ValueError('connectedness must be either 4 or 8')
-    log.info("bliblou 4")
+
     structure = generate_binary_structure(rank=2, connectivity=connectivity)
-    log.info("bliblou 5")
+
     if pixels > 1:
         structure = iterate_structure(structure=structure, iterations=pixels)
-    log.info("bliblou 6")
+
     if workdir is not None:
         fname_mask = os.path.join(workdir, 'datamask.tif')
     else:
         fname_mask = os.path.join(os.path.dirname(src), 'datamask.tif')
-    log.info("bliblou 7")
+
     write_intermediates = False  # this is intended for debugging
     
     def erosion(src, dst, structure, only_boundary, write_intermediates=False):
-        log.info("bliblou 8")
+
         if not os.path.isfile(dst):
-            log.info(src)
             with Raster(src) as ref:
-                log.info("bliblou 9")
                 array = ref.array()
-                log.info("bliblou 10")
                 mask = array != 0
-                log.info("bliblou 11")
                 if write_intermediates:
                     ref.write(dst.replace('.tif', '_init.tif'),
                               array=mask, dtype='Byte')
-                    log.info("bliblou 12")
                 if only_boundary:
-                    log.info("bliblou 13")
                     with vectorize(target=mask, reference=ref) as vec:
-                        log.info("bliblou 14")
-                        log.info(mask)
-                        log.info(ref)
-                        log.info("bliblouuouou")
-                        log.info(vec)
-                        log.info(vec.vector.GetLayerCount())
-                        log.info("bliblouuouou")
-                        log.info("flflflflf")
                         with boundary(vec, expression="value=1") as bounds:
-                            log.info("bliblou 15")
                             with rasterize(vectorobject=bounds, reference=ref, nodata=None) as new:
-                                log.info("bliblou 16")
                                 mask = new.array()
                                 if write_intermediates:
-                                    log.info("bliblou 17")
                                     vec.write(dst.replace('.tif', '_init_vectorized.gpkg'))
-                                    log.info("bliblou 18")
                                     bounds.write(dst.replace('.tif', '_boundary_vectorized.gpkg'))
-                                    log.info("bliblou 19")
                                     new.write(outname=dst.replace('.tif', '_boundary.tif'), dtype='Byte')
-                                    log.info("bliblou 20")
                 mask = binary_erosion(input=mask, structure=structure)
-                log.info("bliblou 21")
                 ref.write(outname=dst, array=mask, dtype='Byte')
-                log.info("bliblou 22")
         else:
             with Raster(dst) as ras:
-                log.info("bliblou a-1")
                 mask = ras.array()
-                log.info("bliblou a-2")
         array[mask == 0] = 0
-        log.info("bliblou a-3")
         return array, mask
-    log.info("bliblou b-1")
+
     mask = None
     for img in images:
         if mask is None:
-            log.info("bliblou b-2")
             array, mask = erosion(src=img, dst=fname_mask,
                                   structure=structure, only_boundary=only_boundary,
                                   write_intermediates=write_intermediates)
-            log.info("bliblou b-3")
         else:
             with Raster(img) as ras:
-                log.info("bliblou b-4")
                 array = ras.array()
             array[mask == 0] = 0
-            log.info("bliblou b-5")
-        log.info("bliblou c-1")
         ras = gdal.Open(img, GA_Update)
-        log.info("bliblou c-2")
         band = ras.GetRasterBand(1)
-        log.info("bliblou c-3")
         band.WriteArray(array)
-        log.info("bliblou c-4")
         band.FlushCache()
-        log.info("bliblou c-5")
+
         band = None
         ras = None
 
