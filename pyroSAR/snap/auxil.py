@@ -1522,6 +1522,7 @@ def erode_edges(src, only_boundary=False, connectedness=4, pixels=1):
                     with vectorize(target=mask, reference=ref) as vec:
                         log.info("bliblou 14")
                         log.info(mask)
+                        log.info(ref)
                         log.info("bliblouuouou")
                         log.info(vec)
                         log.info("bliblouuouou")
