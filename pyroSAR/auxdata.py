@@ -1429,7 +1429,7 @@ def get_egm_lookup(geoid, software):
         if not os.path.isfile(local):
             remote = 'https://step.esa.int/auxdata/dem/egm96/ww15mgh_b.zip'
             log.info('{} <<-- {}'.format(local, remote))
-            r = requests.get(remote)
+            r = requests.get(remote, verify=False) #MM
             r.raise_for_status()
             with open(local, 'wb') as out:
                 out.write(r.content)
