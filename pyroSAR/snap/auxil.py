@@ -1,7 +1,7 @@
 ###############################################################################
 # pyroSAR SNAP API tools
 
-# Copyright (c) 2017-2022, the pyroSAR Developers.
+# Copyright (c) 2017-2023, the pyroSAR Developers.
 
 # This file is part of the pyroSAR Project. It is subject to the
 # license terms in the LICENSE.txt file found in the top-level
@@ -309,9 +309,9 @@ def gpt(xmlfile, tmpdir, groups=None, cleanup=True,
     
     Note
     ----
-    Depending on the parametrization this function might create two sub-directories in `tmpdir`,
-    carrying a suffix  \*_bnr for S1 GRD border noise removal and \*_sub for sub-workflows and their
-    intermediate outputs. Both are deleted if ``cleanup=True``. If `tmpdir` is empty afterwards, it is also deleted.
+    Depending on the parametrization this function might create two subdirectories in `tmpdir`,
+    bnr for S1 GRD border noise removal and sub for sub-workflows and their intermediate outputs.
+    Both are deleted if ``cleanup=True``. If `tmpdir` is empty afterward it is also deleted.
     
     Parameters
     ----------
@@ -320,24 +320,31 @@ def gpt(xmlfile, tmpdir, groups=None, cleanup=True,
     tmpdir: str
         a temporary directory for storing intermediate files
     groups: list[list[str]] or None
-        a list of lists each containing IDs for individual nodes
+        a list of lists each containing IDs for individual nodes. If not None, the workflow is split into
+        sub-workflows executing the nodes in the respective group. These workflows and their output products
+        are stored into the subdirectory sub of `tmpdir`.
     cleanup: bool
-        should all files written to the temporary directory during function execution be deleted after processing?
+        should all temporary files be deleted after processing? First, the subdirectories bnr and sub of `tmpdir`
+        are deleted. If `tmpdir` is empty afterward it is also deleted.
     gpt_exceptions: dict or None
         a dictionary to override the configured GPT executable for certain operators;
         each (sub-)workflow containing this operator will be executed with the define executable;
         
          - e.g. ``{'Terrain-Flattening': '/home/user/snap/bin/gpt'}``
-    gpt_args: list or None
+    
+    gpt_args: list[str] or None
         a list of additional arguments to be passed to the gpt call
         
-        - e.g. ``['-x', '-c', '2048M']`` for increased tile cache size and intermediate clearing
+         - e.g. ``['-x', '-c', '2048M']`` for increased tile cache size and intermediate clearing
+    
     removeS1BorderNoiseMethod: str
         the border noise removal method to be applied, See :func:`pyroSAR.S1.removeGRDBorderNoise` for details;
         one of the following:
         
          - 'ESA': the pure implementation as described by ESA
-         - 'pyroSAR': the ESA method plus the custom pyroSAR refinement
+         - 'pyroSAR': the ESA method plus the custom pyroSAR refinement. This is only applied if the IPF version is
+           < 2.9 where additional noise removal was necessary. The output of the additional noise removal is stored
+           in the subdirectory bnr of `tmpdir`.
     
     Returns
     -------
@@ -464,8 +471,9 @@ def writer(xmlfile, outdir, basename_extensions=None,
         log.info(message.format('cleaning image edges and ' if clean_edges else ''))
         translateoptions = {'options': ['-q', '-co', 'INTERLEAVE=BAND', '-co', 'TILED=YES'],
                             'format': 'GTiff'}
+        if clean_edges:
+            erode_edges(src=src, only_boundary=True, pixels=clean_edges_npixels)
 
-        erode_edges(src=src, only_boundary=True, pixels=clean_edges_npixels)
         if src_format == 'BEAM-DIMAP':
             src = src.replace('.dim', '.data')
         for item in finder(src, ['*.img'], recursive=False):
@@ -1499,14 +1507,19 @@ def erode_edges(src, only_boundary=False, connectedness=4, pixels=1):
     write_intermediates = False  # this is intended for debugging
     
     def erosion(src, dst, structure, only_boundary, write_intermediates=False):
-
-        if not os.path.isfile(dst):
-            with Raster(src) as ref:
-                array = ref.array()
+        with Raster(src) as ref:
+            array = ref.array()
+            if not os.path.isfile(dst):
                 mask = array != 0
+                # do not perform erosion if data only contains nodata (mask == 1)
+                if len(mask[mask == 1]) == 0:
+                    ref.write(outname=dst, array=mask, dtype='Byte',
+                              options=['COMPRESS=DEFLATE'])
+                    return array, mask
                 if write_intermediates:
                     ref.write(dst.replace('.tif', '_init.tif'),
-                              array=mask, dtype='Byte')
+                              array=mask, dtype='Byte',
+                              options=['COMPRESS=DEFLATE'])
                 if only_boundary:
                     with vectorize(target=mask, reference=ref) as vec:
                         with boundary(vec, expression="value=1") as bounds:
@@ -1515,15 +1528,21 @@ def erode_edges(src, only_boundary=False, connectedness=4, pixels=1):
                                 if write_intermediates:
                                     vec.write(dst.replace('.tif', '_init_vectorized.gpkg'))
                                     bounds.write(dst.replace('.tif', '_boundary_vectorized.gpkg'))
-                                    new.write(outname=dst.replace('.tif', '_boundary.tif'), dtype='Byte')
+                                    new.write(outname=dst.replace('.tif', '_boundary.tif'),
+                                              dtype='Byte', options=['COMPRESS=DEFLATE'])
                 mask = binary_erosion(input=mask, structure=structure)
-                ref.write(outname=dst, array=mask, dtype='Byte')
-        else:
-            with Raster(dst) as ras:
-                mask = ras.array()
+                ref.write(outname=dst, array=mask, dtype='Byte',
+                          options=['COMPRESS=DEFLATE'])
+            else:
+                with Raster(dst) as ras:
+                    mask = ras.array()
         array[mask == 0] = 0
         return array, mask
-
+    
+    # make sure a backscatter image is used for creating the mask
+    backscatter = [x for x in images if re.search('^(?:Sigma0_|Gamma0_|C11|C22)', os.path.basename(x))]
+    images.insert(0, images.pop(images.index(backscatter[0])))
+    
     mask = None
     for img in images:
         if mask is None:
@@ -1534,6 +1553,10 @@ def erode_edges(src, only_boundary=False, connectedness=4, pixels=1):
             with Raster(img) as ras:
                 array = ras.array()
             array[mask == 0] = 0
+        # do not apply mask if it only contains 1 (valid data)
+        if len(mask[mask == 0]) == 0:
+            break
+
         ras = gdal.Open(img, GA_Update)
         band = ras.GetRasterBand(1)
         band.WriteArray(array)
@@ -1603,7 +1626,7 @@ def mli_parametrize(scene, spacing=None, rlks=None, azlks=None, **kwargs):
         return ml
 
 
-def orb_parametrize(scene, formatName, allow_RES_OSV=True, **kwargs):
+def orb_parametrize(scene, formatName, allow_RES_OSV=True, url_option=1, **kwargs):
     """
     convenience function for parametrizing an `Apply-Orbit-File`.
     Required Sentinel-1 orbit files are directly downloaded.
@@ -1620,6 +1643,8 @@ def orb_parametrize(scene, formatName, allow_RES_OSV=True, **kwargs):
         the scene's data format
     allow_RES_OSV: bool
         (only applies to Sentinel-1) Also allow the less accurate RES orbit files to be used?
+    url_option: int
+        the OSV download URL option; see :meth:`pyroSAR.S1.OSV.catch`
     kwargs
         further keyword arguments for node parametrization. Known options:
         
@@ -1639,9 +1664,9 @@ def orb_parametrize(scene, formatName, allow_RES_OSV=True, **kwargs):
     
     if formatName == 'SENTINEL-1':
         osv_type = ['POE', 'RES'] if allow_RES_OSV else 'POE'
-        match = scene.getOSV(osvType=osv_type, returnMatch=True)
+        match = scene.getOSV(osvType=osv_type, returnMatch=True, url_option=url_option)
         if match is None and allow_RES_OSV:
-            scene.getOSV(osvType='RES')
+            scene.getOSV(osvType='RES', url_option=url_option)
             orbitType = 'Sentinel Restituted (Auto Download)'
     
     orb = parse_node('Apply-Orbit-File')

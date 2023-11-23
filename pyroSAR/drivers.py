@@ -1,6 +1,6 @@
 ###############################################################################
 # Reading and Organizing system for SAR images
-# Copyright (c) 2016-2022, the pyroSAR Developers.
+# Copyright (c) 2016-2023, the pyroSAR Developers.
 
 # This file is part of the pyroSAR Project. It is subject to the
 # license terms in the LICENSE.txt file found in the top-level
@@ -55,7 +55,7 @@ from .xml_util import getNamespaces
 from spatialist import crsConvert, sqlite3, Vector, bbox
 from spatialist.ancillary import parse_literal, finder
 
-from sqlalchemy import create_engine, Table, MetaData, Column, Integer, String, exc
+from sqlalchemy import create_engine, Table, MetaData, Column, Integer, String, exc, insert
 from sqlalchemy import inspect as sql_inspect
 from sqlalchemy.event import listen
 from sqlalchemy.orm import sessionmaker
@@ -87,7 +87,7 @@ def identify(scene):
 
     Returns
     -------
-    a subclass object of :class:`~pyroSAR.drivers.ID`
+    pyroSAR.drivers.ID
         a pyroSAR metadata handler
     
     Examples
@@ -117,7 +117,13 @@ def identify(scene):
     if not os.path.exists(scene):
         raise OSError("No such file or directory: '{}'".format(scene))
     
-    for handler in ID.__subclasses__():
+    def get_subclasses(c):
+        subclasses = c.__subclasses__()
+        for subclass in subclasses.copy():
+            subclasses.extend(get_subclasses(subclass))
+        return list(set(subclasses))
+    
+    for handler in get_subclasses(ID):
         try:
             return handler(scene)
         except (RuntimeError, KeyError, AttributeError):
@@ -136,7 +142,7 @@ def identify_many(scenes, pbar=False, sortkey=None):
         the file names of the scenes to be identified
     pbar: bool
         adds a progressbar if True
-    sortkey: str
+    sortkey: str or None
         sort the handler object list by an attribute
     Returns
     -------
@@ -223,6 +229,8 @@ class ID(object):
             value = getattr(self, item)
             if item == 'projection':
                 value = crsConvert(value, 'proj4')
+            if value == -1:
+                value = '<no global value per product>'
             line = '{0}: {1}'.format(item, value)
             lines.append(line)
         return '\n'.join(lines)
@@ -271,6 +279,8 @@ class ID(object):
         ~spatialist.vector.Vector or None
             the vector object if `outname` is None, None otherwise
         """
+        if 'coordinates' not in self.meta.keys():
+            raise NotImplementedError
         srs = crsConvert(self.projection, 'osr')
         ring = ogr.Geometry(ogr.wkbLinearRing)
         for coordinate in self.meta['coordinates']:
@@ -819,23 +829,21 @@ class BEAM_DIMAP(ID):
         else:
             self.meta['projection'] = crsConvert(4326, 'wkt')
         
-        longs = [
-            get_by_name('first_far_long', section=section),
-            get_by_name('first_near_long', section=section),
-            get_by_name('last_far_long', section=section),
-            get_by_name('last_near_long', section=section)
-        ]
-        lats = [
-            get_by_name('first_far_lat', section=section),
-            get_by_name('first_near_lat', section=section),
-            get_by_name('last_far_lat', section=section),
-            get_by_name('last_near_lat', section=section)
-        ]
-        # Convert to floats
-        longs = [float(lon) for lon in longs]
-        lats = [float(lat) for lat in lats]
+        keys = ['{}_{}_{}'.format(a, b, c)
+                for a in ['first', 'last']
+                for b in ['far', 'near']
+                for c in ['lat', 'long']]
+        coords = {key: float(get_by_name(key, section=section))
+                  for key in keys}
+        longs = [coords[x] for x in keys if x.endswith('long')]
+        lats = [coords[x] for x in keys if x.endswith('lat')]
+        
         self.meta['corners'] = {'xmin': min(longs), 'xmax': max(longs),
                                 'ymin': min(lats), 'ymax': max(lats)}
+        self.meta['coordinates'] = [(coords['first_near_long'], coords['first_near_lat']),
+                                    (coords['last_near_long'], coords['last_near_lat']),
+                                    (coords['last_far_long'], coords['last_far_lat']),
+                                    (coords['first_far_long'], coords['first_far_lat'])]
     
     def unpack(self, directory, overwrite=False, exist_ok=False):
         raise RuntimeError('unpacking of BEAM-DIMAP products is not supported')
@@ -1665,7 +1673,7 @@ class SAFE(ID):
         if not re.match(re.compile(self.pattern), os.path.basename(self.file)):
             raise RuntimeError('folder does not match S1 scene naming convention')
         
-        # scan the metadata XML files file and add selected attributes to a meta dictionary
+        # scan the metadata XML file and add selected attributes to a meta dictionary
         self.meta = self.scanMetadata()
         self.meta['projection'] = crsConvert(4326, 'wkt')
         
@@ -1720,10 +1728,7 @@ class SAFE(ID):
         timeout: int or tuple or None
             the timeout in seconds for downloading OSV files as provided to :func:`requests.get`
         url_option: int
-            the URL to query for scenes
-            
-             - 1: https://scihub.copernicus.eu/gnss
-             - 2: https://step.esa.int/auxdata/orbits/Sentinel-1
+            the OSV download URL option; see :meth:`pyroSAR.S1.OSV.catch` for options
 
         Returns
         -------
@@ -1734,11 +1739,6 @@ class SAFE(ID):
         --------
         :class:`pyroSAR.S1.OSV`
         """
-        date = datetime.strptime(self.start, '%Y%m%dT%H%M%S')
-        # create a time span with one day before and one after the acquisition
-        before = (date - timedelta(days=1)).strftime('%Y%m%dT%H%M%S')
-        after = (date + timedelta(days=1)).strftime('%Y%m%dT%H%M%S')
-        
         with S1.OSV(osvdir, timeout=timeout) as osv:
             if useLocal:
                 match = osv.match(sensor=self.sensor, timestamp=self.start,
@@ -1748,15 +1748,15 @@ class SAFE(ID):
             
             if osvType in ['POE', 'RES']:
                 files = osv.catch(sensor=self.sensor, osvtype=osvType,
-                                  start=before, stop=after,
+                                  start=self.start, stop=self.stop,
                                   url_option=url_option)
             elif sorted(osvType) == ['POE', 'RES']:
                 files = osv.catch(sensor=self.sensor, osvtype='POE',
-                                  start=before, stop=after,
+                                  start=self.start, stop=self.stop,
                                   url_option=url_option)
                 if len(files) == 0:
                     files = osv.catch(sensor=self.sensor, osvtype='RES',
-                                      start=before, stop=after,
+                                      start=self.start, stop=self.stop,
                                       url_option=url_option)
             else:
                 msg = "osvType must either be 'POE', 'RES' or a list of both"
@@ -1788,6 +1788,10 @@ class SAFE(ID):
         -------
 
         """
+        if self.product not in ['GRD', 'SLC']:
+            msg = 'this method has only been implemented for GRD and SLC, not {}'
+            raise RuntimeError(msg.format(self.product))
+        
         if format != 'kmz':
             raise RuntimeError('currently only kmz is supported as format')
         kml_name = self.findfiles('map-overlay.kml')[0]
@@ -1832,6 +1836,10 @@ class SAFE(ID):
         """
         if 'resolution' in self.meta.keys():
             return self.meta['resolution']
+        if self.product not in ['GRD', 'SLC']:
+            msg = 'this method has only been implemented for GRD and SLC, not {}'
+            raise RuntimeError(msg.format(self.product))
+        
         annotations = self.findfiles(self.pattern_ds)
         key = lambda x: re.search('-[vh]{2}-', x).group()
         groups = groupby(sorted(annotations, key=key), key=key)
@@ -1890,9 +1898,17 @@ class SAFE(ID):
         tree = ET.fromstring(manifest)
         
         meta = dict()
-        acqmode = tree.find('.//s1sarl1:mode', namespaces).text
+        key = 's1sarl1'
+        obj_prod = tree.find('.//{}:productType'.format(key), namespaces)
+        if obj_prod == None:
+            key = 's1sarl2'
+            obj_prod = tree.find('.//{}:productType'.format(key), namespaces)
+        
+        meta['product'] = obj_prod.text
+        
+        acqmode = tree.find('.//{}:mode'.format(key), namespaces).text
         if acqmode == 'SM':
-            meta['acquisition_mode'] = tree.find('.//s1sarl1:swath', namespaces).text
+            meta['acquisition_mode'] = tree.find('.//{}:swath'.format(key), namespaces).text
         else:
             meta['acquisition_mode'] = acqmode
         meta['acquisition_time'] = dict(
@@ -1905,7 +1921,7 @@ class SAFE(ID):
         meta['orbitNumber_abs'] = int(tree.find('.//safe:orbitNumber[@type="start"]', namespaces).text)
         meta['orbitNumber_rel'] = int(tree.find('.//safe:relativeOrbitNumber[@type="start"]', namespaces).text)
         meta['cycleNumber'] = int(tree.find('.//safe:cycleNumber', namespaces).text)
-        meta['frameNumber'] = int(tree.find('.//s1sarl1:missionDataTakeID', namespaces).text)
+        meta['frameNumber'] = int(tree.find('.//{}:missionDataTakeID'.format(key), namespaces).text)
         
         meta['orbitNumbers_abs'] = dict(
             [(x, int(tree.find('.//safe:orbitNumber[@type="{0}"]'.format(x), namespaces).text)) for x in
@@ -1913,36 +1929,47 @@ class SAFE(ID):
         meta['orbitNumbers_rel'] = dict(
             [(x, int(tree.find('.//safe:relativeOrbitNumber[@type="{0}"]'.format(x), namespaces).text)) for x in
              ['start', 'stop']])
-        meta['polarizations'] = [x.text for x in tree.findall('.//s1sarl1:transmitterReceiverPolarisation', namespaces)]
-        meta['product'] = tree.find('.//s1sarl1:productType', namespaces).text
-        meta['category'] = tree.find('.//s1sarl1:productClass', namespaces).text
-        meta['sensor'] = tree.find('.//safe:familyName', namespaces).text.replace('ENTINEL-', '') + tree.find(
-            './/safe:number', namespaces).text
+        key_pol = './/{}:transmitterReceiverPolarisation'.format(key)
+        meta['polarizations'] = [x.text for x in tree.findall(key_pol, namespaces)]
+        meta['category'] = tree.find('.//{}:productClass'.format(key), namespaces).text
+        family = tree.find('.//safe:familyName', namespaces).text.replace('ENTINEL-', '')
+        number = tree.find('.//safe:number', namespaces).text
+        meta['sensor'] = family + number
         meta['IPF_version'] = float(tree.find('.//safe:software', namespaces).attrib['version'])
-        meta['sliceNumber'] = int(tree.find('.//s1sarl1:sliceNumber', namespaces).text)
-        meta['totalSlices'] = int(tree.find('.//s1sarl1:totalSlices', namespaces).text)
+        sliced = tree.find('.//{}:sliceProductFlag'.format(key), namespaces).text == 'true'
+        if sliced:
+            meta['sliceNumber'] = int(tree.find('.//{}:sliceNumber'.format(key), namespaces).text)
+            meta['totalSlices'] = int(tree.find('.//{}:totalSlices'.format(key), namespaces).text)
+        else:
+            meta['sliceNumber'] = None
+            meta['totalSlices'] = None
         
-        annotations = self.findfiles(self.pattern_ds)
-        key = lambda x: re.search('-[vh]{2}-', x).group()
-        groups = groupby(sorted(annotations, key=key), key=key)
-        annotations = [list(value) for key, value in groups][0]
-        ann_trees = []
-        for ann in annotations:
-            with self.getFileObj(ann) as ann_xml:
-                ann_trees.append(ET.fromstring(ann_xml.read()))
-        
-        sp_rg = [float(x.find('.//rangePixelSpacing').text) for x in ann_trees]
-        sp_az = [float(x.find('.//azimuthPixelSpacing').text) for x in ann_trees]
-        meta['spacing'] = (median(sp_rg), median(sp_az))
-        samples = [x.find('.//imageAnnotation/imageInformation/numberOfSamples').text for x in ann_trees]
-        meta['samples'] = sum([int(x) for x in samples])
-        lines = [x.find('.//imageAnnotation/imageInformation/numberOfLines').text for x in ann_trees]
-        meta['lines'] = sum([int(x) for x in lines])
-        heading = median(float(x.find('.//platformHeading').text) for x in ann_trees)
-        meta['heading'] = heading if heading > 0 else heading + 360
-        incidence = [float(x.find('.//incidenceAngleMidSwath').text) for x in ann_trees]
-        meta['incidence'] = median(incidence)
-        meta['image_geometry'] = ann_trees[0].find('.//projection').text.replace(' ', '_').upper()
+        if meta['product'] == 'OCN':
+            meta['spacing'] = -1
+            meta['samples'] = -1
+            meta['lines'] = -1
+        else:
+            annotations = self.findfiles(self.pattern_ds)
+            key = lambda x: re.search('-[vh]{2}-', x).group()
+            groups = groupby(sorted(annotations, key=key), key=key)
+            annotations = [list(value) for key, value in groups][0]
+            ann_trees = []
+            for ann in annotations:
+                with self.getFileObj(ann) as ann_xml:
+                    ann_trees.append(ET.fromstring(ann_xml.read()))
+            
+            sp_rg = [float(x.find('.//rangePixelSpacing').text) for x in ann_trees]
+            sp_az = [float(x.find('.//azimuthPixelSpacing').text) for x in ann_trees]
+            meta['spacing'] = (median(sp_rg), median(sp_az))
+            samples = [x.find('.//imageAnnotation/imageInformation/numberOfSamples').text for x in ann_trees]
+            meta['samples'] = sum([int(x) for x in samples])
+            lines = [x.find('.//imageAnnotation/imageInformation/numberOfLines').text for x in ann_trees]
+            meta['lines'] = sum([int(x) for x in lines])
+            heading = median(float(x.find('.//platformHeading').text) for x in ann_trees)
+            meta['heading'] = heading if heading > 0 else heading + 360
+            incidence = [float(x.find('.//incidenceAngleMidSwath').text) for x in ann_trees]
+            meta['incidence'] = median(incidence)
+            meta['image_geometry'] = ann_trees[0].find('.//projection').text.replace(' ', '_').upper()
         
         return meta
     
@@ -2204,7 +2231,7 @@ class Archive(object):
     dbfile: str
         the filename for the SpatiaLite database. This might either point to an existing database or will be created otherwise.
         If postgres is set to True, this will be the name for the PostgreSQL database.
-    custom_fields: dict
+    custom_fields: dict or None
         a dictionary containing additional non-standard database column names and data types;
         the names must be attributes of the SAR scenes to be inserted (i.e. id.attr) or keys in their meta attribute
         (i.e. id.meta['attr'])
@@ -2220,7 +2247,9 @@ class Archive(object):
         required for postgres driver: port number to the database. Default: 5432
     cleanup: bool
         check whether all registered scenes exist and remove missing entries?
-
+    legacy: bool
+        open an outdated database in legacy mode to import into a new database.
+        Opening an outdated database without legacy mode will throw a RuntimeError.
 
     Examples
     ----------
@@ -2270,10 +2299,20 @@ class Archive(object):
     >>> scenes_s1 = finder(archive_s1, [r'^S1[AB].*\.zip'], regex=True, recursive=True)
     >>> with Archive(dbfile, driver='postgres', user='user', password='password', host='host', port=5432) as archive:
     >>>     archive.insert(scenes_s1)
+    
+    Importing an old database:
+    
+    >>> from pyroSAR import Archive
+    >>> db_new = 'scenes.db'
+    >>> db_old = 'scenes_old.db'
+    >>> with Archive(db_new) as db:
+    >>>     with Archive(db_old, legacy=True) as db_old:
+    >>>         db.import_outdated(db_old)
     """
     
     def __init__(self, dbfile, custom_fields=None, postgres=False, user='postgres',
-                 password='1234', host='localhost', port=5432, cleanup=True):
+                 password='1234', host='localhost', port=5432, cleanup=True,
+                 legacy=False):
         # check for driver, if postgres then check if server is reachable
         if not postgres:
             self.driver = 'sqlite'
@@ -2290,6 +2329,8 @@ class Archive(object):
             if not self.__check_host(host, port):
                 sys.exit('Server not found!')
         
+        connect_args = {}
+        
         # create dict, with which a URL to the db is created
         if self.driver == 'sqlite':
             self.url_dict = {'drivername': self.driver,
@@ -2302,11 +2343,18 @@ class Archive(object):
                              'host': host,
                              'port': port,
                              'database': dbfile}
+            connect_args = {
+                'keepalives': 1,
+                'keepalives_idle': 30,
+                'keepalives_interval': 10,
+                'keepalives_count': 5}
         
         # create engine, containing URL and driver
         log.debug('starting DB engine for {}'.format(URL.create(**self.url_dict)))
         self.url = URL.create(**self.url_dict)
-        self.engine = create_engine(self.url, echo=False)
+        # https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-PARAMKEYWORDS
+        self.engine = create_engine(url=self.url, echo=False,
+                                    connect_args=connect_args)
         
         # call to ____load_spatialite() for sqlite, to load mod_spatialite via event handler listen()
         if self.driver == 'sqlite':
@@ -2338,52 +2386,16 @@ class Archive(object):
         self.meta = MetaData(self.engine)
         self.custom_fields = custom_fields
         
-        # create tables as schema
-        self.data_schema = Table('data', self.meta,
-                                 Column('sensor', String),
-                                 Column('orbit', String),
-                                 Column('orbitNumber_abs', Integer),
-                                 Column('orbitNumber_rel', Integer),
-                                 Column('cycleNumber', Integer),
-                                 Column('frameNumber', Integer),
-                                 Column('acquisition_mode', String),
-                                 Column('start', String),
-                                 Column('stop', String),
-                                 Column('product', String),
-                                 Column('samples', Integer),
-                                 Column('lines', Integer),
-                                 Column('outname_base', String, primary_key=True),
-                                 Column('scene', String),
-                                 Column('hh', Integer),
-                                 Column('vv', Integer),
-                                 Column('hv', Integer),
-                                 Column('vh', Integer),
-                                 Column('bbox', Geometry(geometry_type='POLYGON', management=True, srid=4326)))
+        # load or create tables
+        self.__init_data_table()
+        self.__init_duplicates_table()
         
-        # add custom fields
-        if self.custom_fields is not None:
-            for key, val in self.custom_fields.items():
-                if val in ['Integer', 'integer', 'int']:
-                    self.data_schema.append_column(Column(key, Integer))
-                elif val in ['String', 'string', 'str']:
-                    self.data_schema.append_column(Column(key, String))
-                else:
-                    log.info('Value in dict custom_fields must be "integer" or "string"!')
+        pk = sql_inspect(self.data_schema).primary_key
+        if 'product' not in pk.columns.keys() and not legacy:
+            raise RuntimeError("the 'data' table is missing a primary key 'product'. "
+                               "Please create a new database and import the old one "
+                               "opened in legacy mode using Archive.import_outdated.")
         
-        # schema for duplicates
-        self.duplicates_schema = Table('duplicates', self.meta,
-                                       Column('outname_base', String, primary_key=True),
-                                       Column('scene', String, primary_key=True))
-        
-        # create tables if not existing
-        if not sql_inspect(self.engine).has_table('data'):
-            log.debug("creating DB table 'data'")
-            self.data_schema.create(self.engine)
-        if not sql_inspect(self.engine).has_table('duplicates'):
-            log.debug("creating DB table 'duplicates'")
-            self.duplicates_schema.create(self.engine)
-        
-        # reflect tables from (by now) existing db, make some variables available within self
         self.Base = automap_base(metadata=self.meta)
         self.Base.prepare(self.engine, reflect=True)
         self.Data = self.Base.classes.data
@@ -2407,7 +2419,7 @@ class Archive(object):
         
         Parameters
         ----------
-        tables: :class:`sqlalchemy.schema.Table` or :obj:`list` of :class:`sqlalchemy.schema.Table`
+        tables: :class:`sqlalchemy.schema.Table` or list[:class:`sqlalchemy.schema.Table`]
             The table(s) to be added to the database.
         """
         created = []
@@ -2427,6 +2439,59 @@ class Archive(object):
         self.Base = automap_base(metadata=self.meta)
         self.Base.prepare(self.engine, reflect=True)
     
+    def __init_data_table(self):
+        if sql_inspect(self.engine).has_table('data'):
+            self.data_schema = Table('data', self.meta, autoload_with=self.engine)
+            return
+        
+        log.debug("creating DB table 'data'")
+        
+        self.data_schema = Table('data', self.meta,
+                                 Column('sensor', String),
+                                 Column('orbit', String),
+                                 Column('orbitNumber_abs', Integer),
+                                 Column('orbitNumber_rel', Integer),
+                                 Column('cycleNumber', Integer),
+                                 Column('frameNumber', Integer),
+                                 Column('acquisition_mode', String),
+                                 Column('start', String),
+                                 Column('stop', String),
+                                 Column('product', String, primary_key=True),
+                                 Column('samples', Integer),
+                                 Column('lines', Integer),
+                                 Column('outname_base', String, primary_key=True),
+                                 Column('scene', String),
+                                 Column('hh', Integer),
+                                 Column('vv', Integer),
+                                 Column('hv', Integer),
+                                 Column('vh', Integer),
+                                 Column('bbox', Geometry(geometry_type='POLYGON',
+                                                         management=True, srid=4326)))
+        # add custom fields
+        if self.custom_fields is not None:
+            for key, val in self.custom_fields.items():
+                if val in ['Integer', 'integer', 'int']:
+                    self.data_schema.append_column(Column(key, Integer))
+                elif val in ['String', 'string', 'str']:
+                    self.data_schema.append_column(Column(key, String))
+                else:
+                    log.info('Value in dict custom_fields must be "integer" or "string"!')
+        
+        self.data_schema.create(self.engine)
+    
+    def __init_duplicates_table(self):
+        # create tables if not existing
+        if sql_inspect(self.engine).has_table('duplicates'):
+            self.duplicates_schema = Table('duplicates', self.meta, autoload_with=self.engine)
+            return
+        
+        log.debug("creating DB table 'duplicates'")
+        
+        self.duplicates_schema = Table('duplicates', self.meta,
+                                       Column('outname_base', String, primary_key=True),
+                                       Column('scene', String, primary_key=True))
+        self.duplicates_schema.create(self.engine)
+    
     @staticmethod
     def __load_spatialite(dbapi_conn, connection_record):
         """
@@ -2437,7 +2502,7 @@ class Archive(object):
         dbapi_conn:
             db engine
         connection_record:
-            not sure what it does but it is needed by :func:`sqlalchemy.event.listen`
+            not sure what it does, but it is needed by :func:`sqlalchemy.event.listen`
         """
         dbapi_conn.enable_load_extension(True)
         # check which platform and use according mod_spatialite
@@ -2448,7 +2513,8 @@ class Archive(object):
                 except sqlite3.OperationalError:
                     continue
         elif platform.system() == 'Darwin':
-            for option in ['mod_spatialite.so', 'mod_spatialite.7.dylib']:  # , 'mod_spatialite.dylib']:
+            for option in ['mod_spatialite.so', 'mod_spatialite.7.dylib',
+                           'mod_spatialite.dylib']:
                 try:
                     dbapi_conn.load_extension(option)
                 except sqlite3.OperationalError:
@@ -2501,7 +2567,7 @@ class Archive(object):
 
         Returns
         -------
-        list
+        list[str]
             the names of all scenes, which are no longer stored in their registered location
         """
         if table == 'data':
@@ -2527,7 +2593,6 @@ class Archive(object):
         test: bool
             should the insertion only be tested or directly be committed to the database?
         """
-        length = len(scene_in) if isinstance(scene_in, list) else 1
         
         if isinstance(scene_in, (ID, str)):
             scene_in = [scene_in]
@@ -2558,12 +2623,11 @@ class Archive(object):
             progress = pb.ProgressBar(max_value=len(scenes))
         else:
             progress = None
-        basenames = []
         insertions = []
         session = self.Session()
         for i, id in enumerate(scenes):
             basename = id.outname_base()
-            if not self.is_registered(id) and basename not in basenames:
+            if not self.is_registered(id):
                 insertion = self.__prepare_insertion(id)
                 insertions.append(insertion)
                 counter_regulars += 1
@@ -2578,7 +2642,6 @@ class Archive(object):
             
             if progress is not None:
                 progress.update(i + 1)
-            basenames.append(basename)
         
         if progress is not None:
             progress.finish()
@@ -2615,8 +2678,8 @@ class Archive(object):
         """
         id = scene if isinstance(scene, ID) else identify(scene)
         # ORM query, where scene equals id.scene, return first
-        exists_data = self.Session().query(self.Data.outname_base).filter(
-            self.Data.outname_base == id.outname_base()).first()
+        exists_data = self.Session().query(self.Data.outname_base).filter_by(
+            outname_base=id.outname_base(), product=id.product).first()
         exists_duplicates = self.Session().query(self.Duplicates.outname_base).filter(
             self.Duplicates.outname_base == id.outname_base()).first()
         in_data = False
@@ -2750,7 +2813,7 @@ class Archive(object):
 
         Returns
         -------
-        list
+        list[str]
             the column names of the chosen table
         """
         # get all columns of one table, but shows geometry columns not correctly
@@ -2771,7 +2834,7 @@ class Archive(object):
 
         Returns
         -------
-        list
+        list[str]
             the table names
         """
         #  TODO: make this dynamic
@@ -2810,26 +2873,36 @@ class Archive(object):
     
     def import_outdated(self, dbfile):
         """
-        import an older data base in csv format
+        import an older database
 
         Parameters
         ----------
-        dbfile: str
-            the file name of the old data base
+        dbfile: str or Archive
+            the old database. If this is a string, the name of a CSV file is expected.
 
         Returns
         -------
 
         """
-        with open(dbfile) as csvfile:
-            text = csvfile.read()
-            csvfile.seek(0)
-            dialect = csv.Sniffer().sniff(text)
-            reader = csv.DictReader(csvfile, dialect=dialect)
-            scenes = []
-            for row in reader:
-                scenes.append(row['scene'])
-            self.insert(scenes)
+        if isinstance(dbfile, str) and dbfile.endswith('csv'):
+            with open(dbfile) as csvfile:
+                text = csvfile.read()
+                csvfile.seek(0)
+                dialect = csv.Sniffer().sniff(text)
+                reader = csv.DictReader(csvfile, dialect=dialect)
+                scenes = []
+                for row in reader:
+                    scenes.append(row['scene'])
+                self.insert(scenes)
+        elif isinstance(dbfile, Archive):
+            select = dbfile.conn.execute('SELECT * from data')
+            self.conn.execute(insert(self.Data).values(*select))
+            # duplicates in older databases may fit into the new data table
+            reinsert = dbfile.select_duplicates(value='scene')
+            if reinsert is not None:
+                self.insert(reinsert)
+        else:
+            raise RuntimeError("'dbfile' must either be a CSV file name or an Archive object")
     
     def move(self, scenelist, directory, pbar=False):
         """
@@ -2901,11 +2974,11 @@ class Archive(object):
 
         Parameters
         ----------
-        vectorobject: :class:`~spatialist.vector.Vector`
+        vectorobject: :class:`~spatialist.vector.Vector` or None
             a geometry with which the scenes need to overlap
-        mindate: str or datetime or None
+        mindate: str or datetime.datetime or None
             the minimum acquisition date; strings must be in format YYYYmmddTHHMMSS; default: None
-        maxdate: str or datetime or None
+        maxdate: str or datetime.datetime or None
             the maximum acquisition date; strings must be in format YYYYmmddTHHMMSS; default: None
         date_strict: bool
             treat dates as strict limits or also allow flexible limits to incorporate scenes
@@ -2913,12 +2986,12 @@ class Archive(object):
             
             - strict: start >= mindate & stop <= maxdate
             - not strict: stop >= mindate & start <= maxdate
-        processdir: str, optional
+        processdir: str or None
             A directory to be scanned for already processed scenes;
             the selected scenes will be filtered to those that have not yet been processed. Default: None
         recursive: bool
             (only if `processdir` is not None) should also the subdirectories of the `processdir` be scanned?
-        polarizations: list[str]
+        polarizations: list[str] or None
             a list of polarization strings, e.g. ['HH', 'VV']
         **args:
             any further arguments (columns), which are registered in the database. See :meth:`~Archive.get_colnames()`
@@ -2974,8 +3047,9 @@ class Archive(object):
         
         if vectorobject:
             if isinstance(vectorobject, Vector):
-                vectorobject.reproject(4326)
-                site_geom = vectorobject.convert2wkt(set3D=False)[0]
+                with vectorobject.clone() as vec:
+                    vec.reproject(4326)
+                    site_geom = vec.convert2wkt(set3D=False)[0]
                 # postgres has a different way to store geometries
                 if self.driver == 'postgresql':
                     arg_format.append("st_intersects(bbox, 'SRID=4326; {}')".format(
@@ -2987,7 +3061,11 @@ class Archive(object):
             else:
                 log.info('WARNING: argument vectorobject is ignored, must be of type spatialist.vector.Vector')
         
-        query = '''SELECT scene, outname_base FROM data WHERE {}'''.format(' AND '.join(arg_format))
+        if len(arg_format) > 0:
+            subquery = ' WHERE {}'.format(' AND '.join(arg_format))
+        else:
+            subquery = ''
+        query = '''SELECT scene, outname_base FROM data{}'''.format(subquery)
         # the query gets assembled stepwise here
         for val in vals:
             query = query.replace('?', """'{0}'""", 1).format(val)
@@ -3023,7 +3101,7 @@ class Archive(object):
 
         Returns
         -------
-        list
+        list[str]
             the selected scene(s)
         """
         if value == 'id':
@@ -3064,7 +3142,7 @@ class Archive(object):
 
         Returns
         -------
-        tuple
+        tuple[int]
             the number of scenes in (1) the main table and (2) the duplicates table
         """
         # ORM query
@@ -3096,7 +3174,7 @@ class Archive(object):
 
         Parameters
         ----------
-        scene: ID
+        scene: str
             a SAR scene
         with_duplicates: bool
             True: delete matching entry in duplicates table
@@ -3157,7 +3235,7 @@ class Archive(object):
         Parameters
         ----------
         table: str
-            tablename
+            the table name
 
         Returns
         -------
@@ -3187,7 +3265,7 @@ class Archive(object):
         ----------
         ip: str
             ip of the server
-        port: str
+        port: str or int
             port of the server
 
         Returns
