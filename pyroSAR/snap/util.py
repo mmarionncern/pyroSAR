@@ -354,11 +354,15 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
         print(ids[i].scene)
         print(formatName)
         print("=======================")
+        print(use_manifest_file)
+        print(ids[i].scene.split(".")[0]+".SAFE/manifest.safe")
         print("=======================")
+    
         if not use_manifest_file:
             read.parameters['file'] = ids[i].scene
         else:
             read.parameters['file'] = ids[i].scene.split(".")[0]+".SAFE/manifest.safe"
+        print(read.parameters['file'])
         read.parameters['formatName'] = formatName
         last = read
         ############################################
