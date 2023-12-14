@@ -39,7 +39,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
             alignToStandardGrid=False, standardGridOriginX=0, standardGridOriginY=0,
             speckleFilter=False, refarea='gamma0', clean_edges=False, clean_edges_npixels=1,
             rlks=None, azlks=None, dem_oversampling_multiple=2, s1_osv_url_option=1,
-            decomposition_modes=None, dynamic_cleaning=False):
+            decomposition_modes=None, dynamic_cleaning=False, use_manifest_file=False):
     """
     general function for geocoding of SAR backscatter images with SNAP.
     
@@ -355,7 +355,10 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
         print(formatName)
         print("=======================")
         print("=======================")
-        read.parameters['file'] = ids[i].scene
+        if not use_manifest_file:
+            read.parameters['file'] = ids[i].scene
+        else:
+            read.parameters['file'] = ids[i].scene.split(".")[0]+".SAFE/manifest.safe"
         read.parameters['formatName'] = formatName
         last = read
         ############################################
@@ -944,7 +947,7 @@ def halpha(infile, swaths=["IW1","IW2","IW3"], t_srs=4326, demName='SRTM 1Sec HG
            cleanup=True, tmpdir=None, outName=None, test=False, enhancedSpectralDiversity=True,
            clean_edges=False, clean_edges_npixels=1, outdir=None, basename_extensions=None,
            returnWF=False,groupsize=2, removeS1BorderNoiseMethod='pyroSAR',
-           dynamic_cleaning=True,geocoding_type='Range-Doppler'):
+           dynamic_cleaning=True,geocoding_type='Range-Doppler', use_manifest_file=False):
 
     if not isinstance(infile, str):
         raise RuntimeError("'infile' must be of type str")
@@ -987,7 +990,10 @@ def halpha(infile, swaths=["IW1","IW2","IW3"], t_srs=4326, demName='SRTM 1Sec HG
         # Read node configuration
         read = parse_node('Read')
         workflow.insert_node(read)
-        read.parameters['file'] = id.scene
+        if not use_manifest_file:
+            read.parameters['file'] = id.scene
+        else:
+            read.parameters['file'] = id.scene.split(".")[0]+".SAFE/manifest.safe"
         read.parameters['formatName'] = formatName
         last = read
 
@@ -1228,7 +1234,7 @@ def insar_coherence(infiles, swaths=["IW1","IW2","IW3"], polarizations='all', t_
                     cleanup=True, tmpdir=None, outName=None, test=False, enhancedSpectralDiversity=True,
                     clean_edges=False, clean_edges_npixels=1, outdir=None, basename_extensions=None,
                     returnWF=False,groupsize=2, removeS1BorderNoiseMethod='pyroSAR',
-                    dynamic_cleaning=True):
+                    dynamic_cleaning=True, use_manifest_file=False):
 
     if not isinstance(infiles, list):
         raise RuntimeError("'infiles' must be of type list")
@@ -1312,7 +1318,10 @@ def insar_coherence(infiles, swaths=["IW1","IW2","IW3"], polarizations='all', t_
                 # Read node configuration
                 read = parse_node('Read')
                 workflow.insert_node(read)
-                read.parameters['file'] = ids[i].scene
+                if not use_manifest_file:
+                    read.parameters['file'] = ids[i].scene
+                else:
+                    read.parameters['file'] = ids[i].scene.split(".")[0]+".SAFE/manifest.safe"
                 read.parameters['formatName'] = formatName
 
                 ############################################
