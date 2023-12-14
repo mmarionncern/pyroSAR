@@ -363,7 +363,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
         else:
             read.parameters['file'] = ids[i].scene.split(".")[0]+".SAFE/manifest.safe"
         print(read.parameters['file'])
-        read.parameters['formatName'] = formatName
+        #read.parameters['formatName'] = formatName
         last = read
         ############################################
         # Remove-GRD-Border-Noise node configuration
@@ -998,7 +998,7 @@ def halpha(infile, swaths=["IW1","IW2","IW3"], t_srs=4326, demName='SRTM 1Sec HG
             read.parameters['file'] = id.scene
         else:
             read.parameters['file'] = id.scene.split(".")[0]+".SAFE/manifest.safe"
-        read.parameters['formatName'] = formatName
+        #read.parameters['formatName'] = formatName
         last = read
 
         ############################################
@@ -1326,7 +1326,7 @@ def insar_coherence(infiles, swaths=["IW1","IW2","IW3"], polarizations='all', t_
                     read.parameters['file'] = ids[i].scene
                 else:
                     read.parameters['file'] = ids[i].scene.split(".")[0]+".SAFE/manifest.safe"
-                read.parameters['formatName'] = formatName
+                #read.parameters['formatName'] = formatName
 
                 ############################################
                 # TOP-SAR split
