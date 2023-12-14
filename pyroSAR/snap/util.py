@@ -349,6 +349,12 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
         # Read node configuration
         read = parse_node('Read')
         workflow.insert_node(read)
+        print("=======================")
+        print("=======================")
+        print(ids[i].scene)
+        print(formatName)
+        print("=======================")
+        print("=======================")
         read.parameters['file'] = ids[i].scene
         read.parameters['formatName'] = formatName
         last = read
