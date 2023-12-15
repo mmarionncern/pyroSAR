@@ -297,6 +297,9 @@ def execute(xmlfile, cleanup=True, gpt_exceptions=None, gpt_args=None):
 def gpt(xmlfile, tmpdir, groups=None, cleanup=True,
         gpt_exceptions=None, gpt_args=None,
         removeS1BorderNoiseMethod='pyroSAR'):
+    print("===================")
+    print(xmlfile)
+    print("===================")
     """
     Wrapper for ESA SNAP's Graph Processing Tool GPT.
     Input is a readily formatted workflow XML file as for example
@@ -1659,19 +1662,20 @@ def orb_parametrize(scene, formatName, allow_RES_OSV=True, url_option=1, **kwarg
     Node
         the Apply-Orbit-File node object
     """
+    print("======== blibli ")
     orbit_lookup = {'ENVISAT': 'PRARE Precise (ERS1&2) (Auto Download)',
                     'SENTINEL-1': 'Sentinel Precise (Auto Download)'}
     orbitType = orbit_lookup[formatName]
     if formatName == 'ENVISAT' and scene.sensor == 'ASAR':
         orbitType = 'DORIS Precise VOR (ENVISAT) (Auto Download)'
-    
+    print("======== blibla ")
     if formatName == 'SENTINEL-1':
         osv_type = ['POE', 'RES'] if allow_RES_OSV else 'POE'
         match = scene.getOSV(osvType=osv_type, returnMatch=True, url_option=url_option)
         if match is None and allow_RES_OSV:
             scene.getOSV(osvType='RES', url_option=url_option)
             orbitType = 'Sentinel Restituted (Auto Download)'
-    
+    print("======== blabli ")
     orb = parse_node('Apply-Orbit-File')
     orb.parameters['orbitType'] = orbitType
     for key, val in kwargs.items():

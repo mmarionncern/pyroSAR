@@ -1673,6 +1673,7 @@ class SAFE(ID):
         --------
         :class:`pyroSAR.S1.OSV`
         """
+        print("=== entering getOS function")
         with S1.OSV(osvdir, timeout=timeout) as osv:
             if useLocal:
                 match = osv.match(sensor=self.sensor, timestamp=self.start,
@@ -1701,7 +1702,9 @@ class SAFE(ID):
             if returnMatch:
                 match = osv.match(sensor=self.sensor, timestamp=self.start,
                                   osvtype=osvType)
+                print("ENDING getOSV functiobn")
                 return match
+        print("ENDING getOSV functiobn")
     
     def quicklook(self, outname, format='kmz', na_transparent=True):
         """
