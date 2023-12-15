@@ -423,10 +423,12 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
     last = orb
     ############################################
     # Subset node configuration
+    print("===== aqui")
     if shapefile is not None or offset is not None:
         sub = sub_parametrize(scene=id, geometry=shapefile, offset=offset, buffer=0.01)
         workflow.insert_node(sub, before=last.id)
         last = sub
+    print("===== aqui1")
     ############################################
     last_ids=[]
     # Matrix decomposition node configurations
@@ -437,7 +439,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
         workflow.insert_node(pol_m, before=last)
         last = pol_m
         bands = ["C11", "C12_real", "C12_imag", "C22"]
-        
+    print("===== aqui2")
     ############################################
     # Multilook node configuration
     if id.sensor in ['ERS1', 'ERS2', 'ASAR']:
@@ -454,7 +456,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
     else:
         if not speckleFilter:
             last_ids.append(pol_m.id)
-        
+    print("===== aqui3")        
     ############################################
     # Terrain-Flattening node configuration
     tf = None
@@ -475,6 +477,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
                 raise RuntimeError("The Terrain-Flattening node does not accept "
                                    "parameter 'outputSigma0'. Please update S1TBX.")
         last = tf
+    print("===== aqui4")
     ############################################
     # Speckle-Filter node configuration
     speckleFilter_options = ['Boxcar',
@@ -488,7 +491,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
                                          'IDAN Filter',
                                          'Refined Lee Filter',
                                          'Improved Lee Sigma Filter']
-    
+    print("===== aqui5")
     if speckleFilter:
         message = '{0} must be one of the following:\n- {1}'
         if speckleFilter not in speckleFilter_options and len(decompositions)==0:
@@ -510,7 +513,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
             sf.parameters["filter"] = speckleFilter
             last = sf
             last_ids.append(last.id)
-
+    print("===== aqui6")
     ############################################
     # Dual polarization H-alpha decomposition
     if "H-alpha" in decompositions:
@@ -520,7 +523,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
         pol_dc.parameters["windowSize"] = 5
         pol_dc.parameters["outputHAAlpha"] = True
         last = pol_dc
-    
+    print("===== aqui7")
     ############################################
     # merge bands to pass them to Terrain-Correction
     bm_tc = None
@@ -539,7 +542,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
         workflow.insert_node(bm_tc, before=nodes)
         bm_tc.parameters['sourceBands']=bands
         last = bm_tc
-        
+    print("===== aqui8")
     if len(refarea) > 1 and terrainFlattening and 'scatteringArea' in export_extra:
         bm_tc = parse_node('BandMerge')
         workflow.insert_node(bm_tc, before=[last.source, last.id])
@@ -561,6 +564,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
         bm_tc.parameters['sourceBands'] = bands_long
         last = bm_tc
         last_ids.append(last.id)
+    print("===== aqui9")
     ############################################
     # configuration of node sequence for specific geocoding approaches
     tc = geo_parametrize(spacing=spacing, t_srs=t_srs,
@@ -573,6 +577,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
         last = tc = tc[-1]
     else:
         last = tc
+    print("===== aqui10")
     ############################################
     # (optionally) add node for conversion from linear to db scaling
     if scaling not in ['dB', 'db', 'linear']:
@@ -591,13 +596,14 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
         tmpdir = outdir
     basename = os.path.join(tmpdir, id.outname_base(basename_extensions))
     outname = basename + '_' + suffix
-    
+    print("===== aqui11")
     write = parse_node('Write')
     workflow.insert_node(write, before=last.id)
     write.parameters['file'] = outname
     write.parameters['formatName'] = 'ENVI'
     ############################################
     ############################################
+    print("===== aqui12")
     if export_extra is not None:
         tc_options = ['incidenceAngleFromEllipsoid',
                       'localIncidenceAngle',
@@ -697,6 +703,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
     ############################################
     ############################################
     # DEM handling
+    print("===== aqui13")
     dem_parametrize(workflow=workflow, demName=demName,
                     externalDEMFile=externalDEMFile,
                     externalDEMNoDataValue=externalDEMNoDataValue,
@@ -713,20 +720,20 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
                    'BISINC_21_POINT_INTERPOLATION',
                    'BICUBIC_INTERPOLATION']
     options_dem = options_img + ['DELAUNAY_INTERPOLATION']
-    
+    print("===== aqui14")
     message = '{0} must be one of the following:\n- {1}'
     if demResamplingMethod not in options_dem:
         raise ValueError(message.format('demResamplingMethod', '\n- '.join(options_dem)))
     if imgResamplingMethod not in options_img:
         raise ValueError(message.format('imgResamplingMethod', '\n- '.join(options_img)))
-    
+    print("===== aqui15")
     workflow.set_par('demResamplingMethod', demResamplingMethod)
     workflow.set_par('imgResamplingMethod', imgResamplingMethod,
                      exceptions=resampling_exceptions)
     ############################################
     ############################################
     # additional parameter settings applied to the whole workflow
-    
+    print("===== aqui16")
     workflow.set_par('nodataValueAtSea', nodataValueAtSea)
     ############################################
     ############################################
@@ -735,31 +742,36 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
     
     wf_name = outname.replace(tmpdir, outdir) + '_proc.xml'
     workflow.write(wf_name)
-    
+    print("===== aqui17")
     # execute the newly written workflow
     if not test:
-        try:
+        #try:
+        if True:
             p=None
+            print("===== aqui18")
             if groupsize>1 and dynamic_cleaning:
                 tmp_name +="/sub"
                 p = Popen(['python', 'dynamicCOHCleaning.py', tmp_name])
 
             groups = groupbyWorkers(wf_name, groupsize)
+            print("===== aqui19")
             gpt(wf_name, groups=groups, cleanup=cleanup, tmpdir=outname,
                 gpt_exceptions=gpt_exceptions, gpt_args=gpt_args,
                 removeS1BorderNoiseMethod=removeS1BorderNoiseMethod)
+            print("===== aqui20")
             writer(xmlfile=wf_name, outdir=outdir, basename_extensions=basename_extensions,
                    clean_edges=clean_edges, clean_edges_npixels=clean_edges_npixels)
+            print("===== aqui21")
             if p:
                 p.terminate()
-        except Exception as e:
-            log.info(str(e))
-            with open(wf_name.replace('_proc.xml', '_error.log'), 'w') as logfile:
-                logfile.write(str(e))
-        finally:
-            if cleanup and os.path.isdir(outname):
-                log.info('deleting temporary files')
-                shutil.rmtree(outname, onerror=windows_fileprefix)
+        #except Exception as e:
+        #    log.info(str(e))
+        #    with open(wf_name.replace('_proc.xml', '_error.log'), 'w') as logfile:
+        #        logfile.write(str(e))
+        #finally:
+        #    if cleanup and os.path.isdir(outname):
+        #        log.info('deleting temporary files')
+        #        shutil.rmtree(outname, onerror=windows_fileprefix)
         log.info('done')
     if returnWF:
         return wf_name
