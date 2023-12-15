@@ -122,7 +122,9 @@ def identify(scene):
         for subclass in subclasses.copy():
             subclasses.extend(get_subclasses(subclass))
         return list(set(subclasses))
-    
+    print("--->>><<<<")
+    print(scene.replace(".SAFE/manifest.safe",".zip"))
+    print(scene)
     for handler in get_subclasses(ID):
         try:
             return handler(scene)
@@ -1595,9 +1597,9 @@ class SAFE(ID):
     def __init__(self, scene):
         
         self.scene = os.path.realpath(scene)
-        
+        print(self.scene)
         self.pattern = patterns.safe
-        
+        print(self.pattern)
         self.pattern_ds = r'^s1[ab]-' \
                           r'(?P<swath>s[1-6]|iw[1-3]?|ew[1-5]?|wv[1-2]|n[1-6])-' \
                           r'(?P<product>slc|grd|ocn)-' \
@@ -1609,7 +1611,7 @@ class SAFE(ID):
                           r'\.xml$'
         
         self.examine(include_folders=True)
-        
+        print("-->>> youpi")
         if not re.match(re.compile(self.pattern), os.path.basename(self.file)):
             raise RuntimeError('folder does not match S1 scene naming convention')
         
