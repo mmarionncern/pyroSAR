@@ -116,21 +116,22 @@ def identify(scene):
     """
     if not os.path.exists(scene):
         raise OSError("No such file or directory: '{}'".format(scene))
+
+    ##MM : overall fix
+    scene = scene.replace(".SAFE/manifest.safe",".zip")
     
     def get_subclasses(c):
         subclasses = c.__subclasses__()
         for subclass in subclasses.copy():
             subclasses.extend(get_subclasses(subclass))
         return list(set(subclasses))
-    print("--->>><<<<")
-    print(scene.replace(".SAFE/manifest.safe",".zip"))
-    print(scene)
+
     for handler in get_subclasses(ID):
         try:
             return handler(scene)
         except Exception:
             pass
-    raise RuntimeError('data format not supported')
+    raise RuntimeError("PyroSAR : Scene format not properly identified (driver.identify)")
 
 
 def identify_many(scenes, pbar=False, sortkey=None):
@@ -1597,9 +1598,9 @@ class SAFE(ID):
     def __init__(self, scene):
         
         self.scene = os.path.realpath(scene)
-        print(self.scene)
+
         self.pattern = patterns.safe
-        print(self.pattern)
+
         self.pattern_ds = r'^s1[ab]-' \
                           r'(?P<swath>s[1-6]|iw[1-3]?|ew[1-5]?|wv[1-2]|n[1-6])-' \
                           r'(?P<product>slc|grd|ocn)-' \
@@ -1611,7 +1612,7 @@ class SAFE(ID):
                           r'\.xml$'
         
         self.examine(include_folders=True)
-        print("-->>> youpi")
+
         if not re.match(re.compile(self.pattern), os.path.basename(self.file)):
             raise RuntimeError('folder does not match S1 scene naming convention')
         
@@ -1675,7 +1676,7 @@ class SAFE(ID):
         --------
         :class:`pyroSAR.S1.OSV`
         """
-        print("=== entering getOS function")
+
         with S1.OSV(osvdir, timeout=timeout) as osv:
             if useLocal:
                 match = osv.match(sensor=self.sensor, timestamp=self.start,
@@ -1704,9 +1705,8 @@ class SAFE(ID):
             if returnMatch:
                 match = osv.match(sensor=self.sensor, timestamp=self.start,
                                   osvtype=osvType)
-                print("ENDING getOSV functiobn")
                 return match
-        print("ENDING getOSV functiobn")
+
     
     def quicklook(self, outname, format='kmz', na_transparent=True):
         """
