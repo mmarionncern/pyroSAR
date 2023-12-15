@@ -240,6 +240,9 @@ def execute(xmlfile, cleanup=True, gpt_exceptions=None, gpt_args=None):
         ])
     cmd.append(xmlfile)
     # execute the workflow
+    print("==============================")
+    print(cmd)
+    print("==============================")
     proc = sp.Popen(cmd, stdout=sp.PIPE, stderr=sp.PIPE)
     out, err = proc.communicate()
     out = out.decode('utf-8') if isinstance(out, bytes) else out
