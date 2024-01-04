@@ -119,6 +119,8 @@ def identify(scene):
 
     ##MM : overall fix
     scene = scene.replace(".SAFE/manifest.safe",".zip")
+    print(scene)
+    sys.exit(0)
     
     def get_subclasses(c):
         subclasses = c.__subclasses__()
