@@ -1606,7 +1606,7 @@ class SAFE(ID):
         self.scene = os.path.realpath(scene)
         logger.error(self.scene)
         self.pattern = patterns.safe
-
+        logger.error("bli")
         self.pattern_ds = r'^s1[ab]-' \
                           r'(?P<swath>s[1-6]|iw[1-3]?|ew[1-5]?|wv[1-2]|n[1-6])-' \
                           r'(?P<product>slc|grd|ocn)-' \
@@ -1616,7 +1616,7 @@ class SAFE(ID):
                           r'(?:[0-9]{6})-(?:[0-9a-f]{6})-' \
                           r'(?P<id>[0-9]{3})' \
                           r'\.xml$'
-        
+        logger.error("bla")
         self.examine(include_folders=True)
         logger.error("before matching")
         if not re.match(re.compile(self.pattern), os.path.basename(self.file)):
