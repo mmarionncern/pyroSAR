@@ -118,10 +118,11 @@ def identify(scene):
         raise OSError("No such file or directory: '{}'".format(scene))
 
     ##MM : overall fix
-    print(scene)
+    import logging
+    logger = logging.getLogger("my_logger")
+    logger.error(scene)
     scene = scene.replace(".SAFE/manifest.safe",".zip")
-    print(scene)
-    sys.exit(0)
+    logger.error(scene)
     
     def get_subclasses(c):
         subclasses = c.__subclasses__()
