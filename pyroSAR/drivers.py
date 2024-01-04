@@ -118,6 +118,7 @@ def identify(scene):
         raise OSError("No such file or directory: '{}'".format(scene))
 
     ##MM : overall fix
+    print(scene)
     scene = scene.replace(".SAFE/manifest.safe",".zip")
     print(scene)
     sys.exit(0)
