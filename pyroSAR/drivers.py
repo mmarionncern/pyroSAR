@@ -1604,6 +1604,7 @@ class SAFE(ID):
     def __init__(self, scene):
         
         self.scene = os.path.realpath(scene)
+        logger.error("---- SAFE")
         logger.error(self.scene)
         self.pattern = patterns.safe
         logger.error("bli")
