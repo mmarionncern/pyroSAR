@@ -71,6 +71,8 @@ import subprocess
 import logging
 
 log = logging.getLogger(__name__)
+import logging
+logger = logging.getLogger("my_logger")
 
 __LOCAL__ = ['sensor', 'projection', 'orbit', 'polarizations', 'acquisition_mode', 'start', 'stop', 'product',
              'spacing', 'samples', 'lines', 'orbitNumber_abs', 'orbitNumber_rel', 'cycleNumber', 'frameNumber']
@@ -118,8 +120,6 @@ def identify(scene):
         raise OSError("No such file or directory: '{}'".format(scene))
 
     ##MM : overall fix
-    import logging
-    logger = logging.getLogger("my_logger")
     logger.error(scene)
     scene = scene.replace(".SAFE/manifest.safe",".zip")
     logger.error(scene)
@@ -1602,7 +1602,7 @@ class SAFE(ID):
     def __init__(self, scene):
         
         self.scene = os.path.realpath(scene)
-
+        logger.error(self.scene)
         self.pattern = patterns.safe
 
         self.pattern_ds = r'^s1[ab]-' \
@@ -1616,10 +1616,10 @@ class SAFE(ID):
                           r'\.xml$'
         
         self.examine(include_folders=True)
-
+        logger.error("before matching")
         if not re.match(re.compile(self.pattern), os.path.basename(self.file)):
             raise RuntimeError('folder does not match S1 scene naming convention')
-        
+        logger.error("name identified")
         # scan the metadata XML file and add selected attributes to a meta dictionary
         self.meta = self.scanMetadata()
         self.meta['projection'] = crsConvert(4326, 'wkt')
@@ -1835,18 +1835,22 @@ class SAFE(ID):
         return self.meta['resolution']
     
     def scanMetadata(self):
+        logger.error("1-")
         with self.getFileObj(self.findfiles('manifest.safe')[0]) as input:
             manifest = input.getvalue()
+        logger.error("2-")
         namespaces = getNamespaces(manifest)
+        logger.error("3-")
         tree = ET.fromstring(manifest)
-        
+        logger.error("4-")
         meta = dict()
         key = 's1sarl1'
         obj_prod = tree.find('.//{}:productType'.format(key), namespaces)
+        logger.error("5-")
         if obj_prod == None:
             key = 's1sarl2'
             obj_prod = tree.find('.//{}:productType'.format(key), namespaces)
-        
+        logger.error("5-")
         meta['product'] = obj_prod.text
         
         acqmode = tree.find('.//{}:mode'.format(key), namespaces).text
@@ -1854,32 +1858,49 @@ class SAFE(ID):
             meta['acquisition_mode'] = tree.find('.//{}:swath'.format(key), namespaces).text
         else:
             meta['acquisition_mode'] = acqmode
+        logger.error("6-")
         meta['acquisition_time'] = dict(
             [(x, tree.find('.//safe:{}Time'.format(x), namespaces).text) for x in ['start', 'stop']])
+        logger.error("7-")
         meta['start'], meta['stop'] = (self.parse_date(meta['acquisition_time'][x]) for x in ['start', 'stop'])
+        logger.error("8-")
         meta['coordinates'] = [tuple([float(y) for y in x.split(',')][::-1]) for x in
                                tree.find('.//gml:coordinates', namespaces).text.split()]
+        logger.error("9-")
         meta['orbit'] = tree.find('.//s1:pass', namespaces).text[0]
-        
+        logger.error("10-")
         meta['orbitNumber_abs'] = int(tree.find('.//safe:orbitNumber[@type="start"]', namespaces).text)
+        logger.error("11-")
         meta['orbitNumber_rel'] = int(tree.find('.//safe:relativeOrbitNumber[@type="start"]', namespaces).text)
+        logger.error("12-")
         meta['cycleNumber'] = int(tree.find('.//safe:cycleNumber', namespaces).text)
+        logger.error("13-")
         meta['frameNumber'] = int(tree.find('.//{}:missionDataTakeID'.format(key), namespaces).text)
-        
+        logger.error("14-")
         meta['orbitNumbers_abs'] = dict(
             [(x, int(tree.find('.//safe:orbitNumber[@type="{0}"]'.format(x), namespaces).text)) for x in
              ['start', 'stop']])
+        logger.error("15-")
         meta['orbitNumbers_rel'] = dict(
             [(x, int(tree.find('.//safe:relativeOrbitNumber[@type="{0}"]'.format(x), namespaces).text)) for x in
              ['start', 'stop']])
+        logger.error("16-")
         key_pol = './/{}:transmitterReceiverPolarisation'.format(key)
+        logger.error("17-")
         meta['polarizations'] = [x.text for x in tree.findall(key_pol, namespaces)]
+        logger.error("18-")
         meta['category'] = tree.find('.//{}:productClass'.format(key), namespaces).text
+        logger.error("19-")
         family = tree.find('.//safe:familyName', namespaces).text.replace('ENTINEL-', '')
+        logger.error("20-")
         number = tree.find('.//safe:number', namespaces).text
+        logger.error("21-")
         meta['sensor'] = family + number
+        logger.error("22-")
         meta['IPF_version'] = float(tree.find('.//safe:software', namespaces).attrib['version'])
+        logger.error("23-")
         sliced = tree.find('.//{}:sliceProductFlag'.format(key), namespaces).text == 'true'
+        logger.error("24-")
         if sliced:
             meta['sliceNumber'] = int(tree.find('.//{}:sliceNumber'.format(key), namespaces).text)
             meta['totalSlices'] = int(tree.find('.//{}:totalSlices'.format(key), namespaces).text)
@@ -1892,6 +1913,7 @@ class SAFE(ID):
             meta['samples'] = -1
             meta['lines'] = -1
         else:
+            logger.error("25-c-")
             annotations = self.findfiles(self.pattern_ds)
             key = lambda x: re.search('-[vh]{2}-', x).group()
             groups = groupby(sorted(annotations, key=key), key=key)
@@ -1913,7 +1935,7 @@ class SAFE(ID):
             incidence = [float(x.find('.//incidenceAngleMidSwath').text) for x in ann_trees]
             meta['incidence'] = median(incidence)
             meta['image_geometry'] = ann_trees[0].find('.//projection').text.replace(' ', '_').upper()
-        
+        logger.error("26-")
         return meta
     
     def unpack(self, directory, overwrite=False, exist_ok=False):
