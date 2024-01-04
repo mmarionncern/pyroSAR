@@ -384,6 +384,7 @@ class ID(object):
         elif len(files) == 0:
             raise RuntimeError('scene does not match {} naming convention'.format(type(self).__name__))
         else:
+            logger.error(self.pattern)
             raise RuntimeError('file ambiguity detected:\n{}'.format('\n'.join(files)))
     
     def findfiles(self, pattern, include_folders=False):
@@ -406,7 +407,9 @@ class ID(object):
         :func:`spatialist.ancillary.finder`
         """
         foldermode = 1 if include_folders else 0
-        
+        logger.error("find file")
+        logger.error(self.scene)
+        logger.error(pattern)
         try:
             files = finder(target=self.scene, matchlist=[pattern],
                            foldermode=foldermode, regex=True)
