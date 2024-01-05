@@ -130,7 +130,7 @@ def identify(scene):
         try:
             return handler(scene)
         except Exception:
-            logger.error(traceback.format_exc())
+            log.error(traceback.format_exc())
             pass
     raise RuntimeError("PyroSAR : Scene format not properly identified (driver.identify)")
 
