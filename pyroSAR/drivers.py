@@ -35,6 +35,7 @@ import re
 import shutil
 import struct
 import operator
+import traceback
 import tarfile as tf
 import xml.etree.ElementTree as ET
 import zipfile as zf
