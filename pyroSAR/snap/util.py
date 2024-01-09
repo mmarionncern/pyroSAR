@@ -1259,7 +1259,7 @@ def insar_coherence(infiles, swaths=["IW1","IW2","IW3"], polarizations='all', t_
     delta_t = (dt.datetime.strptime(id_2.start,"%Y%m%dT%H%M%S")-dt.datetime.strptime(id_1.start,"%Y%m%dT%H%M%S")).total_seconds()
     for i in range(1,5):
         delta_t = delta_t-12*86400
-        if (delta_t<=10 and delta_t>=-10)
+        if (delta_t<=10 and delta_t>=-10):
             break
             
     if id_1.orbitNumber_rel!=id_2.orbitNumber_rel or\
