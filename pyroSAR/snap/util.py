@@ -1256,16 +1256,17 @@ def insar_coherence(infiles, swaths=["IW1","IW2","IW3"], polarizations='all', t_
 
     #check s1 frame compatibility
     # second image has to be the first image used for coherence estimation
-    delta_t = (dt.datetime.strptime(id_2.start,"%Y%m%dT%H%M%S")-dt.datetime.strptime(id_1.start,"%Y%m%dT%H%M%S")).total_seconds()-12*86400
-    #delta_day = (dt.datetime.strptime(id_1.start,"%Y%m%dT%H%M%S")-dt.datetime.strptime(id_2.start,"%Y%m%dT%H%M%S")).days
-    #delta_sec_p = abs((dt.datetime.strptime(id_1.start,"%Y%m%dT%H%M%S")-dt.datetime.strptime(id_2.start,"%Y%m%dT%H%M%S")).seconds)
-    #delta_sec_m = abs((dt.datetime.strptime(id_2.start,"%Y%m%dT%H%M%S")-dt.datetime.strptime(id_1.start,"%Y%m%dT%H%M%S")).seconds)
+    delta_t = (dt.datetime.strptime(id_2.start,"%Y%m%dT%H%M%S")-dt.datetime.strptime(id_1.start,"%Y%m%dT%H%M%S")).total_seconds()
+    for i in range(1,5):
+        delta_t = delta_t-12*86400
+        if (delta_t<=10 and delta_t>=-10)
+            break
+            
     if id_1.orbitNumber_rel!=id_2.orbitNumber_rel or\
        id_1.orbit!=id_2.orbit or\
        id_1.sensor!=id_2.sensor or \
        abs(delta_t)>10:
-       #(delta_day!=12 and not (delta_day==11 and delta_sec_p>86345)) or
-       #min(delta_sec_p, delta_sec_m)>10:
+
        
        import logging
        logger = logging.getLogger("my_logger")
