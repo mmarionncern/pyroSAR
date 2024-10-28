@@ -1,7 +1,7 @@
 ###############################################################################
 # Convenience functions for SAR image batch processing with ESA SNAP
 
-# Copyright (c) 2016-2022, the pyroSAR Developers.
+# Copyright (c) 2016-2024, the pyroSAR Developers.
 
 # This file is part of the pyroSAR Project. It is subject to the
 # license terms in the LICENSE.txt file found in the top-level
@@ -16,6 +16,7 @@ import re
 import datetime as dt
 from subprocess import Popen
 import shutil
+import traceback
 from ..drivers import identify, identify_many, ID
 from .auxil import parse_recipe, parse_node, gpt, groupbyWorkers, writer, \
     windows_fileprefix, orb_parametrize, geo_parametrize, sub_parametrize, \
@@ -26,7 +27,6 @@ from spatialist.ancillary import dissolve
 import logging
 
 log = logging.getLogger(__name__)
-
 
 
 def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefile=None, scaling='dB',
@@ -42,9 +42,9 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
             decomposition_modes=None, dynamic_cleaning=False, use_manifest_file=False):
     """
     general function for geocoding of SAR backscatter images with SNAP.
-    
+
     This function performs the following steps:
-    
+
     - (if necessary) identify the SAR scene(s) passed via argument `infile` (:func:`pyroSAR.drivers.identify`)
     - (if necessary) create the directories defined via `outdir` and `tmpdir`
     - (if necessary) download Sentinel-1 OSV files
@@ -59,9 +59,9 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
     which will be created in `tmpdir`.
     Its name is created from the basename of the `infile` (:meth:`pyroSAR.drivers.ID.outname_base`)
     and a suffix identifying each processing node of the workflow (:meth:`pyroSAR.snap.auxil.Workflow.suffix`).
-    
+
     For example: `S1A__IW___A_20180101T170648_NR_Orb_Cal_ML_TF_TC`.
-    
+
     Parameters
     ----------
     infile: str or ~pyroSAR.drivers.ID or list
@@ -70,7 +70,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
     outdir: str
         The directory to write the final files to.
     t_srs: int or str or osgeo.osr.SpatialReference
-        A target geographic reference system in WKT, EPSG, PROJ4 or OPENGIS format.
+        A target spatial reference system in WKT, EPSG, PROJ4 or OPENGIS format.
         See function :func:`spatialist.auxil.crsConvert()` for details.
         Default: `4326 <https://spatialreference.org/ref/epsg/4326/>`_.
     spacing: int or float, optional
@@ -79,8 +79,12 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
         The polarizations to be processed; can be a string for a single polarization, e.g. 'VV', or a list of several
         polarizations, e.g. ['VV', 'VH']. With the special value 'all' (default) all available polarizations are
         processed.
-    shapefile: str or :py:class:`~spatialist.vector.Vector` or dict, optional
-        A vector geometry for subsetting the SAR scene to a test site. Default is None.
+    shapefile: str or :class:`~spatialist.vector.Vector` or dict, optional
+        A vector geometry for spatial subsetting:
+
+         - :class:`~spatialist.vector.Vector`: a vector object in arbitrary CRS
+         - :class:`str`: a name of a file that can be read with :class:`~spatialist.vector.Vector` in arbitrary CRS
+         - :class:`dict`: a dictionary with keys `xmin`, `xmax`, `ymin`, `ymax` in EPSG:4326 coordinates
     scaling: {'dB', 'db', 'linear'}, optional
         Should the output be in linear or decibel scaling? Default is 'dB'.
     geocoding_type: {'Range-Doppler', 'SAR simulation cross correlation'}, optional
@@ -90,7 +94,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
     removeS1BorderNoiseMethod: str, optional
         The border noise removal method to be applied if `removeS1BorderNoise` is True.
         See :func:`pyroSAR.S1.removeGRDBorderNoise` for details. One of the following:
-        
+
          - 'ESA': the pure implementation as described by ESA
          - 'pyroSAR': the ESA method plus the custom pyroSAR refinement (default)
     removeS1ThermalNoise: bool, optional
@@ -107,7 +111,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
     demName: str
         The name of the auto-download DEM. Default is 'SRTM 1Sec HGT'. Is ignored when `externalDEMFile` is not None.
         Supported options:
-        
+
          - ACE2_5Min
          - ACE30
          - ASTER 1sec GDEM
@@ -133,7 +137,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
         If set to True the workflow xml file is only written and not executed. Default is False.
     export_extra: list or None
         A list of image file IDs to be exported to outdir. The following IDs are currently supported:
-        
+
          - incidenceAngleFromEllipsoid
          - localIncidenceAngle
          - projectedLocalIncidenceAngle
@@ -152,11 +156,11 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
     gpt_exceptions: dict or None
         A dictionary to override the configured GPT executable for certain operators;
         each (sub-)workflow containing this operator will be executed with the define executable;
-        
+
          - e.g. ``{'Terrain-Flattening': '/home/user/snap/bin/gpt'}``
     gpt_args: list or None
         A list of additional arguments to be passed to the gpt call.
-        
+
         - e.g. ``['-x', '-c', '2048M']`` for increased tile cache size and intermediate clearing
     returnWF: bool
         Return the full name of the written workflow XML file?
@@ -164,7 +168,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
         Mask pixels acquired over sea? The sea mask depends on the selected DEM.
     demResamplingMethod: str
         One of the following:
-        
+
          - 'NEAREST_NEIGHBOUR'
          - 'BILINEAR_INTERPOLATION'
          - 'CUBIC_CONVOLUTION'
@@ -182,7 +186,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
         The y origin value for grid alignment
     speckleFilter: str
         One of the following:
-        
+
          - 'Boxcar'
          - 'Median'
          - 'Frost'
@@ -215,11 +219,11 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
     -------
     str or None
         Either the name of the workflow file if ``returnWF == True`` or None otherwise
-    
-    
+
+
     .. figure:: figures/snap_geocode.svg
         :align: center
-        
+
         Function geocode workflow diagram for processing Sentinel-1 scenes.
         Dashed lines depict optional steps. The output is sigma or gamma nought
         backscatter with ellipsoid or radiometric terrain correction (suffix elp/rtc)
@@ -245,7 +249,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
             import scipy
         except ImportError:
             raise RuntimeError('please install scipy to clean edges')
-    
+
     if isinstance(infile, ID):
         id = infile
         ids = [id]
@@ -261,13 +265,13 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
     if id.is_processed(outdir):
         log.info('scene {} already processed'.format(id.outname_base()))
         return
-    
+
     if not os.path.isdir(outdir):
         os.makedirs(outdir)
     ############################################
     # general setup
     process_S1_SLC = False
-    
+
     if id.sensor in ['ASAR', 'ERS1', 'ERS2']:
         formatName = 'ENVISAT'
     elif id.sensor in ['S1A', 'S1B']:
@@ -281,26 +285,27 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
     if decomposition_modes is not None:
         if not process_S1_SLC:
             raise RuntimeError("Signal decomposition is only valid for SLC data")
-        
-        valid_decompositions = ["C2","H-alpha"]
-        if set(valid_decompositions+decomposition_modes)!=set(valid_decompositions):
-            raise RuntimeError(f"Decomposition modes {decomposition_modes} are not valid, authorized modes are {valid_decompositions}")
-        
-        #thermal nois removal not suited for signal decomposition
+
+        valid_decompositions = ["C2", "H-alpha"]
+        if set(valid_decompositions + decomposition_modes) != set(valid_decompositions):
+            raise RuntimeError(
+                f"Decomposition modes {decomposition_modes} are not valid, authorized modes are {valid_decompositions}")
+
+        # thermal nois removal not suited for signal decomposition
         removeS1ThermalNoise = False
-        #unrelevant terrain flattening
+        # unrelevant terrain flattening
         terrainFlattening = False
-        #sclaing has to be linear
+        # sclaing has to be linear
         scaling = 'linear'
-        if isinstance(decomposition_modes,str):
+        if isinstance(decomposition_modes, str):
             decompositions = [decomposition_modes]
         elif isinstance(decomposition_modes, list):
             decompositions = decomposition_modes
         else:
             raise RuntimeError("decomposition_modes must be of type str or list")
     else:
-        decompositions=[]
-        
+        decompositions = []
+
     # several options like resampling are modified globally for the whole workflow at the end of this function
     # this list gathers IDs of nodes for which this should not be done because they are configured individually
     resampling_exceptions = []
@@ -317,7 +322,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
         polarizations = [x for x in polarizations if x in id.polarizations]
     else:
         raise RuntimeError('polarizations must be of type str or list')
-    
+
     swaths = None
     if process_S1_SLC:
         if id.acquisition_mode == 'IW':
@@ -328,7 +333,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
             pass
         else:
             raise RuntimeError('acquisition mode {} not supported'.format(id.acquisition_mode))
-    
+
     bandnames = dict()
     bandnames['beta0'] = ['Beta0_' + x for x in polarizations]
     bandnames['gamma0'] = ['Gamma0_' + x for x in polarizations]
@@ -341,7 +346,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
     ############################################
     if not isinstance(infile, list):
         infile = [infile]
-    
+
     last = None
     collect = []
     for i in range(0, len(infile)):
@@ -349,13 +354,13 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
         # Read node configuration
         read = parse_node('Read')
         workflow.insert_node(read)
-    
+
         if not use_manifest_file:
             read.parameters['file'] = ids[i].scene
         else:
-            read.parameters['file'] = ids[i].scene.split(".")[0]+".SAFE/manifest.safe"
+            read.parameters['file'] = ids[i].scene.split(".")[0] + ".SAFE/manifest.safe"
 
-        #read.parameters['formatName'] = formatName
+        # read.parameters['formatName'] = formatName
         last = read
         ############################################
         # Remove-GRD-Border-Noise node configuration
@@ -382,7 +387,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
                 cal.parameters['output{}Band'.format(opt[:-1].capitalize())] = True
         if id.sensor in ['ERS1', 'ERS2', 'ASAR']:
             cal.parameters['createBetaBand'] = True
-        if len(decompositions)!=0:
+        if len(decompositions) != 0:
             cal.parameters['outputImageInComplex'] = True
         last = cal
         ############################################
@@ -420,10 +425,10 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
         workflow.insert_node(sub, before=last.id)
         last = sub
     ############################################
-    last_ids=[]
+    last_ids = []
     # Matrix decomposition node configurations
     if "H-alpha" in decompositions or "C2" in decompositions:
-        ##create C2 covariance matrix
+        # create C2 covariance matrix
         pol_m = parse_node("Polarimetric-Matrices")
         pol_m.parameters["matrix"] = "C2"
         workflow.insert_node(pol_m, before=last)
@@ -463,7 +468,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
                 tf.parameters['outputSigma0'] = True
             except KeyError:
                 raise RuntimeError("The Terrain-Flattening node does not accept "
-                                   "parameter 'outputSigma0'. Please update S1TBX.")
+                                   "parameter 'outputSigma0'. Please update SNAP.")
         last = tf
     ############################################
     # Speckle-Filter node configuration
@@ -480,12 +485,12 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
                                          'Improved Lee Sigma Filter']
     if speckleFilter:
         message = '{0} must be one of the following:\n- {1}'
-        if speckleFilter not in speckleFilter_options and len(decompositions)==0:
+        if speckleFilter not in speckleFilter_options and len(decompositions) == 0:
             raise ValueError(message.format('speckleFilter', '\n- '.join(speckleFilter_options)))
-        if speckleFilter not in polarimetricSpeckleFilter_options and len(decompositions)!=0:
+        if speckleFilter not in polarimetricSpeckleFilter_options and len(decompositions) != 0:
             raise ValueError(message.format('speckleFilter', '\n- '.join(speckleFilter_options)))
 
-        if len(decompositions)==0:
+        if len(decompositions) == 0:
             sf = parse_node('Speckle-Filter')
             workflow.insert_node(sf, before=last.id)
             sf.parameters['sourceBands'] = None
@@ -493,7 +498,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
             last = sf
             last_ids = [last.id]
         else:
-            ##polaricmetric speckle filtering
+            # polaricmetric speckle filtering
             sf = parse_node("Polarimetric-Speckle-Filter")
             workflow.insert_node(sf, before=last.id)
             sf.parameters["filter"] = speckleFilter
@@ -511,11 +516,11 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
     ############################################
     # merge bands to pass them to Terrain-Correction
     bm_tc = None
-    if len(decompositions)==0:
+    if len(decompositions) == 0:
         bands = dissolve([bandnames[opt] for opt in refarea])
     else:
-        bands=[]
-        nodes=[]
+        bands = []
+        nodes = []
         if "H-alpha" in decompositions:
             bands.extend(["Alpha", "Entropy", "Anisotropy"])
             nodes.append(last.id)
@@ -524,7 +529,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
             nodes.append(sf.id)
         bm_tc = parse_node('BandMerge')
         workflow.insert_node(bm_tc, before=nodes)
-        bm_tc.parameters['sourceBands']=bands
+        bm_tc.parameters['sourceBands'] = bands
         last = bm_tc
     if len(refarea) > 1 and terrainFlattening and 'scatteringArea' in export_extra:
         bm_tc = parse_node('BandMerge')
@@ -563,7 +568,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
     # (optionally) add node for conversion from linear to db scaling
     if scaling not in ['dB', 'db', 'linear']:
         raise RuntimeError('scaling must be  a string of either "dB", "db" or "linear"')
-    
+
     if scaling in ['dB', 'db']:
         lin2db = parse_node('LinearToFromdB')
         workflow.insert_node(lin2db, before=last.id)
@@ -605,35 +610,35 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
                 area_select = parse_node('BandSelect')
                 workflow.insert_node(area_select, before=tf.source, resetSuccessorSource=False)
                 area_select.parameters['sourceBands'] = bandnames['beta0']
-                
+
                 area_merge1 = parse_node('BandMerge')
                 workflow.insert_node(area_merge1, before=[tf.id, area_select.id], resetSuccessorSource=False)
-                
+
                 math = parse_node('BandMaths')
                 workflow.insert_node(math, before=area_merge1.id, resetSuccessorSource=False)
-                
+
                 pol = polarizations[0]  # the result will be the same for each polarization
                 area = 'scatteringArea_{0}'.format(pol)
                 expression = 'Beta0_{0} / Gamma0_{0}'.format(pol)
-                
+
                 math.parameters.clear_variables()
                 exp = math.parameters['targetBands'][0]
                 exp['name'] = area
                 exp['type'] = 'float32'
                 exp['expression'] = expression
                 exp['noDataValue'] = 0.0
-                
+
                 if len(refarea) > 1:
                     bm_tc.source = bm_tc.source + [math.id]
                 else:
                     bm_tc = parse_node('BandMerge')
                     workflow.insert_node(bm_tc, before=[tf.id, math.id], resetSuccessorSource=False)
                     tc.source = bm_tc.id
-                
+
                 # modify Terrain-Correction source bands
                 tc_bands = tc.parameters['sourceBands'] + ',' + area
                 tc.parameters['sourceBands'] = tc_bands
-                
+
                 # add scattering Area to list of band directly written from Terrain-Correction
                 tc_selection.append(area)
             elif item == 'gammaSigmaRatio':
@@ -644,29 +649,29 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
                                      "must contain both sigma0 and gamma0")
                 math = parse_node('BandMaths')
                 workflow.insert_node(math, before=tf.id, resetSuccessorSource=False)
-                
+
                 pol = polarizations[0]  # the result will be the same for each polarization
                 ratio = 'gammaSigmaRatio_{0}'.format(pol)
                 expression = 'Sigma0_{0} / Gamma0_{0}'.format(pol)
-                
+
                 math.parameters.clear_variables()
                 exp = math.parameters['targetBands'][0]
                 exp['name'] = ratio
                 exp['type'] = 'float32'
                 exp['expression'] = expression
                 exp['noDataValue'] = 0.0
-                
+
                 if len(refarea) > 1:
                     bm_tc.source = bm_tc.source + [math.id]
                 else:
                     bm_tc = parse_node('BandMerge')
                     workflow.insert_node(bm_tc, before=[tf.id, math.id], resetSuccessorSource=False)
                     tc.source = bm_tc.id
-                
+
                 # modify Terrain-Correction source bands
                 tc_bands = tc.parameters['sourceBands'] + ',' + ratio
                 tc.parameters['sourceBands'] = tc_bands
-                
+
                 # add scattering Area to list of band directly written from Terrain-Correction
                 tc_selection.append(ratio)
             else:
@@ -690,7 +695,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
     ############################################
     ############################################
     # configure the resampling methods
-    
+
     options_img = ['NEAREST_NEIGHBOUR',
                    'BILINEAR_INTERPOLATION',
                    'CUBIC_CONVOLUTION',
@@ -716,17 +721,18 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
     ############################################
     # write workflow to file and optionally execute it
     log.debug('writing workflow to file')
-    
+
+    tmp_name = outname.replace(tmpdir, outdir)
     wf_name = outname.replace(tmpdir, outdir) + '_proc.xml'
     workflow.write(wf_name)
 
     # execute the newly written workflow
     if not test:
-        #try:
+        # try:
         if True:
-            p=None
-            if groupsize>1 and dynamic_cleaning:
-                tmp_name +="/sub"
+            p = None
+            if groupsize > 1 and dynamic_cleaning:
+                tmp_name += "/sub"
                 p = Popen(['python', 'dynamicCOHCleaning.py', tmp_name])
 
             groups = groupbyWorkers(wf_name, groupsize)
@@ -735,16 +741,18 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
                 removeS1BorderNoiseMethod=removeS1BorderNoiseMethod)
             writer(xmlfile=wf_name, outdir=outdir, basename_extensions=basename_extensions,
                    clean_edges=clean_edges, clean_edges_npixels=clean_edges_npixels)
+
             if p:
                 p.terminate()
-        #except Exception as e:
+        # except Exception as e:
         #    log.info(str(e))
         #    with open(wf_name.replace('_proc.xml', '_error.log'), 'w') as logfile:
         #        logfile.write(str(e))
-        #finally:
+        # finally:
         #    if cleanup and os.path.isdir(outname):
         #        log.info('deleting temporary files')
         #        shutil.rmtree(outname, onerror=windows_fileprefix)
+
         log.info('done')
     if returnWF:
         return wf_name
@@ -769,7 +777,7 @@ def noise_power(infile, outdir, polarizations, spacing, t_srs, refarea='sigma0',
     spacing: int or float
         The target pixel spacing in meters.
     t_srs: int or str or osgeo.osr.SpatialReference
-        A target geographic reference system in WKT, EPSG, PROJ4 or OPENGIS format.
+        A target spatial reference system in WKT, EPSG, PROJ4 or OPENGIS format.
     refarea: str
         either 'beta0', 'gamma0' or 'sigma0'.
     tmpdir: str
@@ -783,7 +791,7 @@ def noise_power(infile, outdir, polarizations, spacing, t_srs, refarea='sigma0',
     demName: str
         The name of the auto-download DEM. Default is 'SRTM 1Sec HGT'. Is ignored when `externalDEMFile` is not None.
         Supported options:
-        
+
          - ACE2_5Min
          - ACE30
          - ASTER 1sec GDEM
@@ -821,7 +829,7 @@ def noise_power(infile, outdir, polarizations, spacing, t_srs, refarea='sigma0',
         the number of azimuth looks. Like `rlks`.
     osv_url_option: int
         the OSV download URL option; see :meth:`pyroSAR.S1.OSV.catch`
-    
+
     Returns
     -------
 
@@ -831,21 +839,21 @@ def noise_power(infile, outdir, polarizations, spacing, t_srs, refarea='sigma0',
             import scipy
         except ImportError:
             raise RuntimeError('please install scipy to clean edges')
-    
+
     if refarea not in ['beta0', 'sigma0', 'gamma0']:
         raise ValueError('refarea not supported')
-    
+
     id = identify(infile)
-    
+
     if id.sensor not in ['S1A', 'S1B']:
         raise RuntimeError('this function is for Sentinel-1 only')
-    
+
     os.makedirs(outdir, exist_ok=True)
     if tmpdir is not None:
         os.makedirs(tmpdir, exist_ok=True)
-    
+
     wf = parse_recipe('blank')
-    
+
     read = parse_node('Read')
     read.parameters['file'] = infile
     wf.insert_node(read)
@@ -860,10 +868,10 @@ def noise_power(infile, outdir, polarizations, spacing, t_srs, refarea='sigma0',
     cal.parameters['outputBetaBand'] = False
     cal.parameters['outputSigmaBand'] = False
     cal.parameters['outputGammaBand'] = False
-    
+
     inband = refarea.capitalize()
     cal.parameters['output{}Band'.format(inband[:-1])] = True
-    
+
     tnr = parse_node('ThermalNoiseRemoval')
     wf.insert_node(tnr, before=cal.id)
     if 'outputNoise' in tnr.parameters.keys():
@@ -898,22 +906,22 @@ def noise_power(infile, outdir, polarizations, spacing, t_srs, refarea='sigma0',
     wf.insert_node(tc, before=last.id)
     last = tc
     ############################################
-    
+
     suffix = wf.suffix()
     if tmpdir is None:
         tmpdir = outdir
     basename = id.outname_base() + '_' + suffix
     procdir = os.path.join(tmpdir, basename)
     outname = os.path.join(procdir, basename + '.dim')
-    
+
     write = parse_node('Write')
     wf.insert_node(write, before=last.id)
     write.parameters['file'] = outname
     write.parameters['formatName'] = 'BEAM-DIMAP'
-    
+
     wf_name = os.path.join(outdir, basename + '_proc.xml')
     wf.write(wf_name)
-    
+
     if not test:
         groups = groupbyWorkers(wf_name, groupsize)
         gpt(xmlfile=wf_name, tmpdir=procdir, groups=groups, cleanup=cleanup)
@@ -924,9 +932,9 @@ def noise_power(infile, outdir, polarizations, spacing, t_srs, refarea='sigma0',
                 shutil.rmtree(procdir, onerror=windows_fileprefix)
 
 
-def halpha(infile, swaths=["IW1","IW2","IW3"], t_srs=4326, demName='SRTM 1Sec HGT',
+def halpha(infile, swaths=["IW1", "IW2", "IW3"], t_srs=4326, demName='SRTM 1Sec HGT',
            allow_RES_OSV=False, demResamplingMethodBGC="BICUBIC_INTERPOLATION",
-           decomposition_modes=["H-alpha","C2"], speckleFilter="IDAN Filter",
+           decomposition_modes=["H-alpha", "C2"], speckleFilter="IDAN Filter",
            maskOutAreaWithoutElevation=False, externalDEMFile=None,
            externalDEMNoDataValue=None, externalDEMApplyEGM=True,
            demResamplingMethod='BILINEAR_INTERPOLATION',
@@ -935,12 +943,12 @@ def halpha(infile, swaths=["IW1","IW2","IW3"], t_srs=4326, demName='SRTM 1Sec HG
            gpt_exceptions=None, gpt_args=None, rlks=None, azlks=None, spacing=20,
            cleanup=True, tmpdir=None, outName=None, test=False, enhancedSpectralDiversity=True,
            clean_edges=False, clean_edges_npixels=1, outdir=None, basename_extensions=None,
-           returnWF=False,groupsize=2, removeS1BorderNoiseMethod='pyroSAR',
-           dynamic_cleaning=True,geocoding_type='Range-Doppler', use_manifest_file=False):
+           returnWF=False, groupsize=2, removeS1BorderNoiseMethod='pyroSAR',
+           dynamic_cleaning=True, geocoding_type='Range-Doppler', use_manifest_file=False):
 
     if not isinstance(infile, str):
         raise RuntimeError("'infile' must be of type str")
-                
+
     id = identify(infile)
 
     if id.is_processed(outdir):
@@ -949,11 +957,11 @@ def halpha(infile, swaths=["IW1","IW2","IW3"], t_srs=4326, demName='SRTM 1Sec HG
 
     if not os.path.isdir(outdir):
         os.makedirs(outdir)
-    
+
     ############################################
     # general setup
     process_S1_SLC = False
-    if id.sensor not in ['S1A', 'S1B', 'S1C'] or id.product!="SLC" :
+    if id.sensor not in ['S1A', 'S1B', 'S1C'] or id.product != "SLC":
         raise RuntimeError('Insar coherence only available for Sentinel mission in SLC mode')
 
     formatName = 'SENTINEL-1'
@@ -964,11 +972,11 @@ def halpha(infile, swaths=["IW1","IW2","IW3"], t_srs=4326, demName='SRTM 1Sec HG
     ######################
 
     if externalDEMFile is None and externalDEMNoDataValue is None:
-        externalDEMNoDataValue=0.
+        externalDEMNoDataValue = 0.
 
     if tmpdir is None:
         tmpdir = outdir
-    
+
     for iw in swaths:
 
         # parse base workflow
@@ -983,11 +991,11 @@ def halpha(infile, swaths=["IW1","IW2","IW3"], t_srs=4326, demName='SRTM 1Sec HG
             read.parameters['file'] = id.scene
         else:
             read.parameters['file'] = id.scene.split(".")[0]+".SAFE/manifest.safe"
-        #read.parameters['formatName'] = formatName
+        # read.parameters['formatName'] = formatName
         last = read
 
         ############################################
-        #TOP-SAR split
+        # TOP-SAR split
         ts_split = parse_node('TOPSAR-Split')
         workflow.insert_node(ts_split, before=last.id)
         ts_split.parameters["subswath"] = iw
@@ -1012,20 +1020,20 @@ def halpha(infile, swaths=["IW1","IW2","IW3"], t_srs=4326, demName='SRTM 1Sec HG
         # Apply-Orbit-File node configuration in coherence estimation
         orb = orb_parametrize(scene=id, formatName=formatName, allow_RES_OSV=allow_RES_OSV)
         workflow.insert_node(orb, before=last.id)
-        #read_iw_orb_ids.append(orb.id)
+        # read_iw_orb_ids.append(orb.id)
         last = orb
 
         ############################################
         # Write temporary file
-    
-        date= id.start.split("T")[0]
-        tmp_out_name= f"S1_HAlpha_{iw}_{date}_tmp"
-        tmp_out= os.path.join(tmpdir, tmp_out_name)
-    
-        write_c2=parse_node("Write")
-        workflow.insert_node(write_c2, before= last.id)
-        write_c2.parameters["file"]= tmp_out
-        write_c2.parameters["formatName"]= "BEAM-DIMAP"
+
+        date = id.start.split("T")[0]
+        tmp_out_name = f"S1_HAlpha_{iw}_{date}_tmp"
+        tmp_out = os.path.join(tmpdir, tmp_out_name)
+
+        write_c2 = parse_node("Write")
+        workflow.insert_node(write_c2, before=last.id)
+        write_c2.parameters["file"] = tmp_out
+        write_c2.parameters["formatName"] = "BEAM-DIMAP"
 
         tmp_wf_name = f"{tmpdir}/Coh_tmp_prep_graph.xml"
         workflow.write(tmp_wf_name)
@@ -1033,13 +1041,13 @@ def halpha(infile, swaths=["IW1","IW2","IW3"], t_srs=4326, demName='SRTM 1Sec HG
             gpt(tmp_wf_name, groups=None, cleanup=False, tmpdir=tmpdir,
                 gpt_exceptions=gpt_exceptions, gpt_args=gpt_args,
                 removeS1BorderNoiseMethod=removeS1BorderNoiseMethod)
-    
+
     import glob
-    tmp_c2_files= glob.glob(f"{tmpdir}/S1_HAlpha_*_{date}_tmp.dim")
+    tmp_c2_files = glob.glob(f"{tmpdir}/S1_HAlpha_*_{date}_tmp.dim")
     print(tmp_c2_files)
-    
+
     workflow = parse_recipe('blank')
-    reads=[]
+    reads = []
     for c2f in tmp_c2_files:
         ############################################
         # Read node configuration for 2nd part
@@ -1048,29 +1056,29 @@ def halpha(infile, swaths=["IW1","IW2","IW3"], t_srs=4326, demName='SRTM 1Sec HG
         read.parameters['file'] = c2f
         read.parameters['formatName'] = "BEAM-DIMAP"
         reads.append(read.id)
-        
+
     ############################################
     # merge sub-swaths node configuration
-    merge=parse_node("TOPSAR-Merge")
-    merge.parameters["selectedPolarisations"]=id.polarizations
+    merge = parse_node("TOPSAR-Merge")
+    merge.parameters["selectedPolarisations"] = id.polarizations
     workflow.insert_node(merge, before=reads)
     last = merge
 
     ############################################
-    ##create C2 covariance matrix
+    # create C2 covariance matrix
     pol_m = parse_node("Polarimetric-Matrices")
     workflow.insert_node(pol_m, before=last.id)
     pol_m.parameters["matrix"] = "C2"
     last = pol_m
     bands = ["C11", "C12_real", "C12_imag", "C22"]
 
-    tmp_out_name= f"S1_HAlpha_c2_{date}_tmp"
-    tmp_out= os.path.join(tmpdir, tmp_out_name)
+    tmp_out_name = f"S1_HAlpha_c2_{date}_tmp"
+    tmp_out = os.path.join(tmpdir, tmp_out_name)
 
-    write_c2=parse_node("Write")
-    workflow.insert_node(write_c2, before= last.id)
-    write_c2.parameters["file"]= tmp_out
-    write_c2.parameters["formatName"]= "BEAM-DIMAP"
+    write_c2 = parse_node("Write")
+    workflow.insert_node(write_c2, before=last.id)
+    write_c2.parameters["file"] = tmp_out
+    write_c2.parameters["formatName"] = "BEAM-DIMAP"
 
     tmp_wf_name = f"{tmpdir}/Coh_tmp_c2_prep_graph.xml"
     workflow.write(tmp_wf_name)
@@ -1080,7 +1088,7 @@ def halpha(infile, swaths=["IW1","IW2","IW3"], t_srs=4326, demName='SRTM 1Sec HG
             removeS1BorderNoiseMethod=removeS1BorderNoiseMethod)
 
     ############################################
-    # last phase        
+    # last phase
     workflow = parse_recipe('blank')
 
     read = parse_node('Read')
@@ -1088,8 +1096,7 @@ def halpha(infile, swaths=["IW1","IW2","IW3"], t_srs=4326, demName='SRTM 1Sec HG
     read.parameters['file'] = f"{tmpdir}/S1_HAlpha_c2_{date}_tmp.dim"
     read.parameters['formatName'] = "BEAM-DIMAP"
     last = read
-    
-    
+
     ############################################
     # Multilook node configuration
     bands = None
@@ -1099,10 +1106,6 @@ def halpha(infile, swaths=["IW1","IW2","IW3"], t_srs=4326, demName='SRTM 1Sec HG
         workflow.insert_node(ml, before=last.id)
         last = ml
 
-
-
-
-        
     ############################################
     # Speckle-Filter node configuration
     polarimetricSpeckleFilter_options = ['Box Car Filter',
@@ -1115,13 +1118,13 @@ def halpha(infile, swaths=["IW1","IW2","IW3"], t_srs=4326, demName='SRTM 1Sec HG
     if speckleFilter not in polarimetricSpeckleFilter_options:
         raise ValueError(message.format('speckleFilter', '\n- '.join(speckleFilter_options)))
 
-    ##polaricmetric speckle filtering
+    # polaricmetric speckle filtering
     sf = parse_node("Polarimetric-Speckle-Filter")
     workflow.insert_node(sf, before=last.id)
     sf.parameters["filter"] = speckleFilter
     last = sf
-    #last_ids.append(last.id)
-    
+    # last_ids.append(last.id)
+
     ############################################
     # Dual polarization H-alpha decomposition
     if "H-alpha" in decomposition_modes:
@@ -1134,10 +1137,10 @@ def halpha(infile, swaths=["IW1","IW2","IW3"], t_srs=4326, demName='SRTM 1Sec HG
 
     ############################################
     # merge bands to pass them to Terrain-Correction
-    if len(decomposition_modes)>1:
+    if len(decomposition_modes) > 1:
         bm_tc = None
-        bands=[]
-        nodes=[]
+        bands = []
+        nodes = []
         if "H-alpha" in decomposition_modes:
             bands.extend(["Alpha", "Entropy", "Anisotropy"])
             nodes.append(last.id)
@@ -1146,7 +1149,7 @@ def halpha(infile, swaths=["IW1","IW2","IW3"], t_srs=4326, demName='SRTM 1Sec HG
             nodes.append(sf.id)
         bm_tc = parse_node('BandMerge')
         workflow.insert_node(bm_tc, before=nodes)
-        bm_tc.parameters['sourceBands']=bands
+        bm_tc.parameters['sourceBands'] = bands
         last = bm_tc
 
     ############################################
@@ -1190,9 +1193,9 @@ def halpha(infile, swaths=["IW1","IW2","IW3"], t_srs=4326, demName='SRTM 1Sec HG
 
     # execute the newly written workflow
     if not test:
-        #try:
+        # try:
         if True:
-            groups=None
+            groups = None
             if groupsize is not None:
                 groups = groupbyWorkers(wf_name, groupsize)
             gpt(wf_name, groups=groups, cleanup=cleanup, tmpdir=outname,
@@ -1200,21 +1203,19 @@ def halpha(infile, swaths=["IW1","IW2","IW3"], t_srs=4326, demName='SRTM 1Sec HG
                 removeS1BorderNoiseMethod=removeS1BorderNoiseMethod)
             writer(xmlfile=wf_name, outdir=outdir, basename_extensions=basename_extensions,
                    clean_edges=clean_edges, clean_edges_npixels=clean_edges_npixels)
-        #except Exception as e:
+        # except Exception as e:
         #    log.info(str(e))
         #    with open(wf_name.replace('_proc.xml', '_error.log'), 'w') as logfile:
         #        logfile.write(str(e))
-        #finally:
+        # finally:
         #    if cleanup and os.path.isdir(outname):
         #        log.info('deleting temporary files')
         #        shutil.rmtree(outname, onerror=windows_fileprefix)
-        #log.info('done')
+        # log.info('done')
 
 
-            
-    
-def insar_coherence(infiles, swaths=["IW1","IW2","IW3"], polarizations='all', t_srs=4326, demName='SRTM 1Sec HGT',
-                    allow_RES_OSV=False, 
+def insar_coherence(infiles, swaths=["IW1", "IW2", "IW3"], polarizations='all', t_srs=4326, demName='SRTM 1Sec HGT',
+                    allow_RES_OSV=False,
                     demResamplingMethodBGC="BICUBIC_INTERPOLATION", maskOutAreaWithoutElevation=False,
                     externalDEMFile=None, externalDEMNoDataValue=None, externalDEMApplyEGM=True,
                     demResamplingMethod='BILINEAR_INTERPOLATION', imgResamplingMethod='BILINEAR_INTERPOLATION',
@@ -1222,12 +1223,12 @@ def insar_coherence(infiles, swaths=["IW1","IW2","IW3"], polarizations='all', t_
                     gpt_exceptions=None, gpt_args=None, rlks=None, azlks=None, cohWinRg=5, cohWinAz=5, spacing=20,
                     cleanup=True, tmpdir=None, outName=None, test=False, enhancedSpectralDiversity=True,
                     clean_edges=False, clean_edges_npixels=1, outdir=None, basename_extensions=None,
-                    returnWF=False,groupsize=2, removeS1BorderNoiseMethod='pyroSAR',
+                    returnWF=False, groupsize=2, removeS1BorderNoiseMethod='pyroSAR',
                     dynamic_cleaning=True, use_manifest_file=False):
 
     if not isinstance(infiles, list):
         raise RuntimeError("'infiles' must be of type list")
-    if len(infiles)!=2:
+    if len(infiles) != 2:
         raise RuntimeError("Two files are mandatory to compute Insar coherence, less or more were provided")
     ids = identify_many(infiles, sortkey='start')
     for id in ids:
@@ -1241,12 +1242,11 @@ def insar_coherence(infiles, swaths=["IW1","IW2","IW3"], polarizations='all', t_
 
     if not os.path.isdir(outdir):
         os.makedirs(outdir)
-    
+
     ############################################
     # general setup
-    process_S1_SLC = False
-    if id_1.sensor not in ['S1A', 'S1B', 'S1C'] or id_1.product!="SLC" or\
-       id_2.sensor not in ['S1A', 'S1B', 'S1C'] or id_2.product!="SLC" :
+    if id_1.sensor not in ['S1A', 'S1B', 'S1C'] or id_1.product != "SLC" or\
+       id_2.sensor not in ['S1A', 'S1B', 'S1C'] or id_2.product != "SLC":
         raise RuntimeError('Insar coherence only available for Sentinel mission in SLC mode')
 
     formatName = 'SENTINEL-1'
@@ -1254,24 +1254,23 @@ def insar_coherence(infiles, swaths=["IW1","IW2","IW3"], polarizations='all', t_
     if id_1.acquisition_mode != 'IW' or id_2.acquisition_mode != 'IW':
         raise RuntimeError(f"acquisition mode {id_1.acquisition_mode}/{id_2.acquisition_mode} not supported")
 
-    #check s1 frame compatibility
+    # check s1 frame compatibility
     # second image has to be the first image used for coherence estimation
-    delta_t = (dt.datetime.strptime(id_2.start,"%Y%m%dT%H%M%S")-dt.datetime.strptime(id_1.start,"%Y%m%dT%H%M%S")).total_seconds()
-    for i in range(1,5):
-        delta_t = delta_t-12*86400
-        if (delta_t<=10 and delta_t>=-10):
+    delta_t = (dt.datetime.strptime(id_2.start, "%Y%m%dT%H%M%S") -
+               dt.datetime.strptime(id_1.start, "%Y%m%dT%H%M%S")).total_seconds()
+    for i in range(1, 5):
+        delta_t = delta_t - i * 12 * 86400
+        if (delta_t <= 10 and delta_t >= -10):
             break
-            
-    if id_1.orbitNumber_rel!=id_2.orbitNumber_rel or\
-       id_1.orbit!=id_2.orbit or\
-       id_1.sensor!=id_2.sensor or \
-       abs(delta_t)>10:
 
-       
-       import logging
-       logger = logging.getLogger("my_logger")
-       logger.error(delta_t)
-       raise RuntimeError(f"Invalid S1 frame comparison, wrong geographical matching")
+    if id_1.orbitNumber_rel != id_2.orbitNumber_rel or\
+       id_1.orbit != id_2.orbit or\
+       id_1.sensor != id_2.sensor or \
+       abs(delta_t) > 10:
+
+        logger = logging.getLogger("my_logger")
+        logger.error(delta_t)
+        raise RuntimeError("Invalid S1 frame comparison, wrong geographical matching")
     ######################
     if isinstance(polarizations, str):
         if polarizations == 'all':
@@ -1286,13 +1285,12 @@ def insar_coherence(infiles, swaths=["IW1","IW2","IW3"], polarizations='all', t_
     else:
         raise RuntimeError('polarizations must be of type str or list')
 
-
     if externalDEMFile is None and externalDEMNoDataValue is None:
-        externalDEMNoDataValue=0.
+        externalDEMNoDataValue = 0.
 
     if tmpdir is None:
         tmpdir = outdir
-        
+
     ############################################
 
     for pol in polarizations:
@@ -1301,8 +1299,8 @@ def insar_coherence(infiles, swaths=["IW1","IW2","IW3"], polarizations='all', t_
             # parse base workflow
             workflow = parse_recipe('blank')
             ############################################
-            
-            read_iw_orb_ids=[]
+
+            read_iw_orb_ids = []
             for i in range(0, len(infiles)):
                 ############################################
                 # Read node configuration
@@ -1311,8 +1309,8 @@ def insar_coherence(infiles, swaths=["IW1","IW2","IW3"], polarizations='all', t_
                 if not use_manifest_file:
                     read.parameters['file'] = ids[i].scene
                 else:
-                    read.parameters['file'] = ids[i].scene.split(".")[0]+".SAFE/manifest.safe"
-                #read.parameters['formatName'] = formatName
+                    read.parameters['file'] = ids[i].scene.split(".")[0] + ".SAFE/manifest.safe"
+                # read.parameters['formatName'] = formatName
 
                 ############################################
                 # TOP-SAR split
@@ -1326,17 +1324,17 @@ def insar_coherence(infiles, swaths=["IW1","IW2","IW3"], polarizations='all', t_
                 orb = orb_parametrize(scene=ids[i], formatName=formatName, allow_RES_OSV=allow_RES_OSV)
                 workflow.insert_node(orb, before=ts_split.id)
                 read_iw_orb_ids.append(orb.id)
-                
+
             ############################################
             # Back geocoding node configuration for coherence estimation
             bgc = parse_node("Back-Geocoding")
             workflow.insert_node(bgc, before=read_iw_orb_ids)
-            bgc.parameters["demName"]= demName
-            bgc.parameters["demResamplingMethod"]= demResamplingMethodBGC
-            bgc.parameters["externalDEMFile"]= externalDEMFile
-            bgc.parameters["externalDEMNoDataValue"]= externalDEMNoDataValue
-            bgc.parameters["resamplingType"]= "BISINC_5_POINT_INTERPOLATION"
-            bgc.parameters["maskOutAreaWithoutElevation"]=maskOutAreaWithoutElevation
+            bgc.parameters["demName"] = demName
+            bgc.parameters["demResamplingMethod"] = demResamplingMethodBGC
+            bgc.parameters["externalDEMFile"] = externalDEMFile
+            bgc.parameters["externalDEMNoDataValue"] = externalDEMNoDataValue
+            bgc.parameters["resamplingType"] = "BISINC_5_POINT_INTERPOLATION"
+            bgc.parameters["maskOutAreaWithoutElevation"] = maskOutAreaWithoutElevation
             last = bgc
             ############################################
             # Enhanced spectral diversity node configuration
@@ -1344,41 +1342,41 @@ def insar_coherence(infiles, swaths=["IW1","IW2","IW3"], polarizations='all', t_
                 esd = parse_node("Enhanced-Spectral-Diversity")
                 workflow.insert_node(esd, before=last.id)
                 last = esd
-        
+
             ############################################
             # Coherence estimation node configuration
             coh = parse_node("Coherence")
             workflow.insert_node(coh, before=last.id)
-            coh.parameters["subtractFlatEarthPhase"]= True
-            coh.parameters["singleMaster"]= True
-            coh.parameters["cohWinRg"]= cohWinRg
-            coh.parameters["cohWinAz"]= cohWinAz
-            coh.parameters["demName"]= demName
-            coh.parameters["subtractTopographicPhase"]= True
-            coh.parameters["externalDEMFile"]= externalDEMFile
-            coh.parameters["externalDEMNoDataValue"]= externalDEMNoDataValue
-            coh.parameters["externalDEMApplyEGM"]= True
+            coh.parameters["subtractFlatEarthPhase"] = True
+            coh.parameters["singleMaster"] = True
+            coh.parameters["cohWinRg"] = cohWinRg
+            coh.parameters["cohWinAz"] = cohWinAz
+            coh.parameters["demName"] = demName
+            coh.parameters["subtractTopographicPhase"] = True
+            coh.parameters["externalDEMFile"] = externalDEMFile
+            coh.parameters["externalDEMNoDataValue"] = externalDEMNoDataValue
+            coh.parameters["externalDEMApplyEGM"] = True
             last = coh
-        
+
             ############################################
             deb = parse_node('TOPSAR-Deburst')
             workflow.insert_node(deb, before=last.id)
-            deb.parameters["selectedPolarisations"]=[pol]
+            deb.parameters["selectedPolarisations"] = [pol]
 
             ############################################
-            ##create out_name and write
+            # create out_name and write
 
-            ##extract dates as str from filename for the day and the full datetime
-            date1= ids[0].start.split("T")[0]
-            date2= ids[1].start.split("T")[0]
-            
-            tmp_out_name= f"S1_{iw}_COH_{pol}_{date1}_{date2}_tmp"
-            tmp_out= os.path.join(tmpdir, tmp_out_name)
+            # extract dates as str from filename for the day and the full datetime
+            date1 = ids[0].start.split("T")[0]
+            date2 = ids[1].start.split("T")[0]
 
-            write_coh=parse_node("Write")
-            workflow.insert_node(write_coh, before= deb.id)
-            write_coh.parameters["file"]= tmp_out
-            write_coh.parameters["formatName"]= "BEAM-DIMAP"
+            tmp_out_name = f"S1_{iw}_COH_{pol}_{date1}_{date2}_tmp"
+            tmp_out = os.path.join(tmpdir, tmp_out_name)
+
+            write_coh = parse_node("Write")
+            workflow.insert_node(write_coh, before=deb.id)
+            write_coh.parameters["file"] = tmp_out
+            write_coh.parameters["formatName"] = "BEAM-DIMAP"
 
             tmp_wf_name = f"{tmpdir}/Coh_tmp_prep_graph_{pol}_{iw}.xml"
             workflow.write(tmp_wf_name)
@@ -1387,14 +1385,14 @@ def insar_coherence(infiles, swaths=["IW1","IW2","IW3"], polarizations='all', t_
                     gpt_exceptions=gpt_exceptions, gpt_args=gpt_args,
                     removeS1BorderNoiseMethod=removeS1BorderNoiseMethod)
 
-        #sys.exit(0)
-        #back to all iws, single polarization
+        # sys.exit(0)
+        # back to all iws, single polarization
         import glob
-        tmp_coh_files= glob.glob(f"{tmpdir}/S1_*_COH_{pol}_{date1}_{date2}_tmp.dim")
+        tmp_coh_files = glob.glob(f"{tmpdir}/S1_*_COH_{pol}_{date1}_{date2}_tmp.dim")
         print(tmp_coh_files)
 
         workflow = parse_recipe('blank')
-        reads=[]
+        reads = []
         for cohf in tmp_coh_files:
             ############################################
             # Read node configuration
@@ -1406,8 +1404,8 @@ def insar_coherence(infiles, swaths=["IW1","IW2","IW3"], polarizations='all', t_
 
         ############################################
         # merge sub-swaths node configuration
-        merge=parse_node("TOPSAR-Merge")
-        merge.parameters["selectedPolarisations"]=pol
+        merge = parse_node("TOPSAR-Merge")
+        merge.parameters["selectedPolarisations"] = pol
         workflow.insert_node(merge, before=reads)
         last = merge
 
@@ -1420,11 +1418,11 @@ def insar_coherence(infiles, swaths=["IW1","IW2","IW3"], polarizations='all', t_
         ############################################
         tc = geo_parametrize(spacing=spacing, t_srs=t_srs, demName=demName,
                              externalDEMFile=externalDEMFile,
-                         externalDEMNoDataValue=externalDEMNoDataValue,
-                         externalDEMApplyEGM=externalDEMApplyEGM,
-                         alignToStandardGrid=alignToStandardGrid,
-                         standardGridOriginX=standardGridOriginX,
-                         standardGridOriginY=standardGridOriginY)
+                             externalDEMNoDataValue=externalDEMNoDataValue,
+                             externalDEMApplyEGM=externalDEMApplyEGM,
+                             alignToStandardGrid=alignToStandardGrid,
+                             standardGridOriginX=standardGridOriginX,
+                             standardGridOriginY=standardGridOriginY)
         workflow.insert_node(tc, before=last.id)
         last = tc
         ############################################
@@ -1432,19 +1430,19 @@ def insar_coherence(infiles, swaths=["IW1","IW2","IW3"], polarizations='all', t_
         ############################################
         # parametrize write node
         # create a suffix for the output file to identify processing steps performed in the workflow
-    
+
         suffix = workflow.suffix()
         if tmpdir is None:
             tmpdir = outdir
         basename = os.path.join(tmpdir, id_1.outname_base(basename_extensions))
         outname = f"{basename}_{pol}_{suffix}"
-    
+
         write = parse_node('Write')
         workflow.insert_node(write, before=last.id)
         write.parameters['file'] = outname
         write.parameters['formatName'] = 'ENVI'
         ############################################
-    
+
         ############################################
         # write workflow to file and optionally execute it
         log.debug('writing workflow to file')
@@ -1452,7 +1450,7 @@ def insar_coherence(infiles, swaths=["IW1","IW2","IW3"], polarizations='all', t_
         tmp_name = outname.replace(tmpdir, outdir)
         wf_name = tmp_name + '_proc.xml'
         workflow.write(wf_name)
-    
+
         # execute the newly written workflow
         if not test:
             try:
@@ -1470,161 +1468,3 @@ def insar_coherence(infiles, swaths=["IW1","IW2","IW3"], polarizations='all', t_
                     log.info('deleting temporary files')
                     shutil.rmtree(outname, onerror=windows_fileprefix)
             log.info('done')
-
-
-        
-
-"""
-            
-    coh_iws=[]
-    for iw in swaths:
-
-        read_iw_orb_ids=[]
-        #reads=[]
-        for i in range(0, len(infiles)):
-            ############################################
-            # Read node configuration
-            read = parse_node('Read')
-            workflow.insert_node(read)
-            read.parameters['file'] = ids[i].scene
-            read.parameters['formatName'] = formatName
-            #reads.append(read)
-
-        #for read in reads: #FIXME MM?
-            ############################################
-            # TOP-SAR split
-            ts_split = parse_node('TOPSAR-Split')
-            workflow.insert_node(ts_split, before=read.id)#, resetSuccessorSource=False)
-            ts_split.parameters["subswath"] = iw
-            ts_split.parameters["selectedPolarisations"] = polarizations
-
-            ############################################
-            # Apply-Orbit-File node configuration in coherence estimation
-            orb = orb_parametrize(scene=ids[i], formatName=formatName, allow_RES_OSV=allow_RES_OSV)
-            workflow.insert_node(orb, before=ts_split.id)
-            
-            read_iw_orb_ids.append(orb.id)
-
-        ############################################
-        # Back geocoding node configuration for coherence estimation
-        bgc = parse_node("Back-Geocoding")
-        workflow.insert_node(bgc, before=read_iw_orb_ids)
-        bgc.parameters["demName"]= demName
-        bgc.parameters["demResamplingMethod"]= demResamplingMethodBGC
-        bgc.parameters["externalDEMFile"]= externalDEMFile
-        bgc.parameters["externalDEMNoDataValue"]= externalDEMNoDataValue
-        bgc.parameters["resamplingType"]= "BISINC_5_POINT_INTERPOLATION"
-        bgc.parameters["maskOutAreaWithoutElevation"]=maskOutAreaWithoutElevation
-        last = bgc
-        ############################################
-        # Enhanced spectral diversity node configuration
-        if enhancedSpectralDiversity:
-            esd = parse_node("Enhanced-Spectral-Diversity")
-            workflow.insert_node(esd, before=last.id)
-            last = esd
-        
-        ############################################
-        # Coherence estimation node configuration
-        coh = parse_node("Coherence")
-        workflow.insert_node(coh, before=last.id)
-        coh.parameters["subtractFlatEarthPhase"]= True
-        coh.parameters["singleMaster"]= True
-        coh.parameters["cohWinRg"]= cohWinRg
-        coh.parameters["cohWinAz"]= cohWinAz
-        coh.parameters["demName"]= demName
-        coh.parameters["subtractTopographicPhase"]= True
-        coh.parameters["externalDEMFile"]= externalDEMFile
-        coh.parameters["externalDEMNoDataValue"]= externalDEMNoDataValue
-        coh.parameters["externalDEMApplyEGM"]= True
-        last = coh
-        
-        ############################################
-        deb = parse_node('TOPSAR-Deburst')
-        workflow.insert_node(deb, before=last.id)
-        deb.parameters["selectedPolarisations"]=polarizations
-        coh_iws.append(deb.id)
-
-    ############################################
-    # merge sub-swaths node configuration
-    merge=parse_node("TOPSAR-Merge")
-    merge.parameters["selectedPolarisations"]=polarizations
-    workflow.insert_node(merge, before=coh_iws)
-    last = merge
-
-    ############################################
-    # Multilook node configuration
-    ml = mli_parametrize(scene=id_1, spacing=spacing, rlks=rlks, azlks=azlks)
-    if ml is not None:
-        workflow.insert_node(ml, before=last.id)
-        last = ml
-    ############################################
-    tc = geo_parametrize(spacing=spacing, t_srs=t_srs, demName=demName,
-                         externalDEMFile=externalDEMFile,
-                         externalDEMNoDataValue=externalDEMNoDataValue,
-                         externalDEMApplyEGM=externalDEMApplyEGM,
-                         alignToStandardGrid=alignToStandardGrid,
-                         standardGridOriginX=standardGridOriginX,
-                         standardGridOriginY=standardGridOriginY)
-    workflow.insert_node(tc, before=last.id)
-    last = tc
-    ############################################
-
-    ############################################
-    # parametrize write node
-    # create a suffix for the output file to identify processing steps performed in the workflow
-    
-    suffix = workflow.suffix()
-    if tmpdir is None:
-        tmpdir = outdir
-    basename = os.path.join(tmpdir, id_1.outname_base(basename_extensions))
-    outname = basename + '_' + suffix
-
-    print(basename, "--", suffix, "--", outname)
-    
-    write = parse_node('Write')
-    workflow.insert_node(write, before=last.id)
-    write.parameters['file'] = outname
-    write.parameters['formatName'] = 'ENVI'
-    ############################################
-    
-    ############################################
-    # write workflow to file and optionally execute it
-    log.debug('writing workflow to file')
-
-    tmp_name = outname.replace(tmpdir, outdir)
-    wf_name = tmp_name + '_proc.xml'
-    workflow.write(wf_name)
-    print(wf_name)
-    print(groupbyWorkers(wf_name, groupsize))
-    
-    # execute the newly written workflow
-    if not test:
-        try:
-            p=None
-            if groupsize>1 and dynamic_cleaning:
-                tmp_name +="/sub"
-                p = Popen(['python', 'dynamicCOHCleaning.py', tmp_name])
-
-            groups = groupbyWorkers(wf_name, groupsize)
-            gpt(wf_name, groups=groups, cleanup=cleanup, tmpdir=outname,
-                gpt_exceptions=gpt_exceptions, gpt_args=gpt_args,
-                removeS1BorderNoiseMethod=removeS1BorderNoiseMethod)
-            writer(xmlfile=wf_name, outdir=outdir, basename_extensions=basename_extensions,
-                   clean_edges=clean_edges, clean_edges_npixels=clean_edges_npixels)
-            if p:
-                p.terminate()
-        except Exception as e:
-            log.info(str(e))
-            with open(wf_name.replace('_proc.xml', '_error.log'), 'w') as logfile:
-                logfile.write(str(e))
-        finally:
-            if cleanup and os.path.isdir(outname):
-                log.info('deleting temporary files')
-                shutil.rmtree(outname, onerror=windows_fileprefix)
-        log.info('done')
-    
-
-
-    if returnWF:
-        return wf_name
-"""
