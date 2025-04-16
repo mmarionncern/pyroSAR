@@ -46,8 +46,8 @@ from itertools import groupby
 from PIL import Image
 
 import progressbar as pb
-from gdal import gdal, osr, ogr
-from gdal.gdalconst import GA_ReadOnly
+from osgeo import gdal, osr, ogr
+from osgeo.gdalconst import GA_ReadOnly
 
 from . import S1, patterns
 from .config import __LOCAL__
