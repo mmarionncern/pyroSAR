@@ -378,7 +378,7 @@ class ID(object):
         elif len(files) == 0:
             raise RuntimeError('scene does not match {} naming convention'.format(type(self).__name__))
         else:
-            raise RuntimeError('file ambiguity detected:\n{}'.format('\n'.join(files)))
+            raise RuntimeError('file ambiguity detected:\n{}'.format('\n'.join(files[:3])))
     
     def findfiles(self, pattern, include_folders=False):
         """
