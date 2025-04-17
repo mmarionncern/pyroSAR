@@ -585,7 +585,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
     outname = basename + '_' + suffix
 
     nodata = parse_node("SetNoDataValue")
-    write.parameters['noDataValue'] = np.nan
+    nodata.parameters['noDataValue'] = np.nan
     workflow.insert_node(nodata, before=last.id)
     last = nodata
                 
@@ -1179,7 +1179,7 @@ def halpha(infile, swaths=["IW1", "IW2", "IW3"], t_srs=4326, demName='SRTM 1Sec 
     outname = basename + '_' + suffix
 
     nodata = parse_node("SetNoDataValue")
-    write.parameters['noDataValue'] = np.nan
+    nodata.parameters['noDataValue'] = np.nan
     workflow.insert_node(nodata, before=last.id)
     last = nodata
                     
@@ -1453,7 +1453,7 @@ def insar_coherence(infiles, swaths=["IW1", "IW2", "IW3"], polarizations='all', 
         outname = f"{basename}_{pol}_{suffix}"
 
         nodata = parse_node("SetNoDataValue")
-        write.parameters['noDataValue'] = np.nan
+        nodata.parameters['noDataValue'] = np.nan
         workflow.insert_node(nodata, before=last.id)
         last = nodata
         
