@@ -323,13 +323,13 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
     else:
         raise RuntimeError('polarizations must be of type str or list')
 
-    swaths = None
     if process_S1_SLC:
         if id.acquisition_mode == 'IW':
             swaths = swaths  # ['IW1', 'IW2', 'IW3']
         elif id.acquisition_mode == 'EW':
             swaths = ['EW1', 'EW2', 'EW3', 'EW4', 'EW5']
         elif re.search('S[1-6]', id.acquisition_mode):
+            swaths = None
             pass
         else:
             raise RuntimeError('acquisition mode {} not supported'.format(id.acquisition_mode))
@@ -1404,7 +1404,6 @@ def insar_coherence(infiles, swaths=["IW1", "IW2", "IW3"], polarizations='all', 
             reads.append(read.id)
 
         ############################################
-        print(reads)
         # merge sub-swaths node configuration
         if len(reads)>1:
             merge = parse_node("TOPSAR-Merge")
