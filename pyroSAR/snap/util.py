@@ -39,7 +39,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
             alignToStandardGrid=False, standardGridOriginX=0, standardGridOriginY=0,
             speckleFilter=False, refarea='gamma0', clean_edges=False, clean_edges_npixels=1,
             rlks=None, azlks=None, dem_oversampling_multiple=2, s1_osv_url_option=1,
-            decomposition_modes=None, dynamic_cleaning=False, use_manifest_file=False):
+            decomposition_modes=None, dynamic_cleaning=False, use_manifest_file=False, swaths=["IW1", "IW2","IW3"]):
     """
     general function for geocoding of SAR backscatter images with SNAP.
 
@@ -326,7 +326,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
     swaths = None
     if process_S1_SLC:
         if id.acquisition_mode == 'IW':
-            swaths = ['IW1', 'IW2', 'IW3']
+            swaths = swaths  # ['IW1', 'IW2', 'IW3']
         elif id.acquisition_mode == 'EW':
             swaths = ['EW1', 'EW2', 'EW3', 'EW4', 'EW5']
         elif re.search('S[1-6]', id.acquisition_mode):
@@ -978,7 +978,7 @@ def halpha(infile, swaths=["IW1", "IW2", "IW3"], t_srs=4326, demName='SRTM 1Sec 
         tmpdir = outdir
 
     for iw in swaths:
-
+        print("HALPHA -> ", iw)
         # parse base workflow
         workflow = parse_recipe('blank')
         ############################################
@@ -1295,7 +1295,7 @@ def insar_coherence(infiles, swaths=["IW1", "IW2", "IW3"], polarizations='all', 
 
     for pol in polarizations:
         for iw in swaths:
-
+            print("coherence -> ", iw, pol)
             # parse base workflow
             workflow = parse_recipe('blank')
             ############################################
