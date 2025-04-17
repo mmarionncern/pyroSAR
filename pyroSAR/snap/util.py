@@ -1061,14 +1061,14 @@ def halpha(infile, swaths=["IW1", "IW2", "IW3"], t_srs=4326, demName='SRTM 1Sec 
         merge = parse_node("TOPSAR-Merge")
         merge.parameters["selectedPolarisations"] = id.polarizations
         workflow.insert_node(merge, before=reads)
-        last = merge
+        last = merge.id
     else:
         last = reads[0]
 
     ############################################
     # create C2 covariance matrix
     pol_m = parse_node("Polarimetric-Matrices")
-    workflow.insert_node(pol_m, before=last.id)
+    workflow.insert_node(pol_m, before=last_id)
     pol_m.parameters["matrix"] = "C2"
     last = pol_m
     bands = ["C11", "C12_real", "C12_imag", "C22"]
@@ -1410,15 +1410,15 @@ def insar_coherence(infiles, swaths=["IW1", "IW2", "IW3"], polarizations='all', 
             merge = parse_node("TOPSAR-Merge")
             merge.parameters["selectedPolarisations"] = pol
             workflow.insert_node(merge, before=reads)
-            last = merge
+            last_id = merge.id
         else:
-            last = reads[0]
+            last_id = reads[0]
 
         ############################################
         # Multilook node configuration
         ml = mli_parametrize(scene=id_1, spacing=spacing, rlks=rlks, azlks=azlks)
         if ml is not None:
-            workflow.insert_node(ml, before=last.id)
+            workflow.insert_node(ml, before=last_id)
             last = ml
         ############################################
         tc = geo_parametrize(spacing=spacing, t_srs=t_srs, demName=demName,
