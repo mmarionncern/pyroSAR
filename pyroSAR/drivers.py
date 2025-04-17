@@ -129,7 +129,8 @@ def identify(scene):
         try:
             return handler(scene)
         except Exception:
-            log.error(traceback.format_exc())
+            if type(handler).__name__ == "ESA":
+                log.error(traceback.format_exc())
             pass
     raise RuntimeError("PyroSAR : Scene format not properly identified (driver.identify)")
 
