@@ -1228,32 +1228,35 @@ def insar_coherence(infiles, swaths=["IW1", "IW2", "IW3"], polarizations='all', 
 
     if not isinstance(infiles, list):
         raise RuntimeError("'infiles' must be of type list")
+    print("bli 1")
     if len(infiles) != 2:
         raise RuntimeError("Two files are mandatory to compute Insar coherence, less or more were provided")
+    print("bli 2")
     ids = identify_many(infiles, sortkey='start')
+    print("bli 3")
     for id in ids:
         log.info(id.meta)
     id_1 = ids[0]
     id_2 = ids[1]
-
+    print("bli 4")
     if id_1.is_processed(outdir):
         log.info(f'scene {id_1.outname_base()} already processed')
         return
 
     if not os.path.isdir(outdir):
         os.makedirs(outdir)
-
+    print("bli 5")
     ############################################
     # general setup
     if id_1.sensor not in ['S1A', 'S1B', 'S1C'] or id_1.product != "SLC" or\
        id_2.sensor not in ['S1A', 'S1B', 'S1C'] or id_2.product != "SLC":
         raise RuntimeError('Insar coherence only available for Sentinel mission in SLC mode')
-
+    print("bli 6")
     formatName = 'SENTINEL-1'
 
     if id_1.acquisition_mode != 'IW' or id_2.acquisition_mode != 'IW':
         raise RuntimeError(f"acquisition mode {id_1.acquisition_mode}/{id_2.acquisition_mode} not supported")
-
+    print("bli 7")
     # check s1 frame compatibility
     # second image has to be the first image used for coherence estimation
     delta_t = (dt.datetime.strptime(id_2.start, "%Y%m%dT%H%M%S") -
@@ -1272,6 +1275,7 @@ def insar_coherence(infiles, swaths=["IW1", "IW2", "IW3"], polarizations='all', 
         logger.error(delta_t)
         raise RuntimeError("Invalid S1 frame comparison, wrong geographical matching")
     ######################
+    print("bli 8")
     if isinstance(polarizations, str):
         if polarizations == 'all':
             polarizations = id_1.polarizations
@@ -1284,15 +1288,15 @@ def insar_coherence(infiles, swaths=["IW1", "IW2", "IW3"], polarizations='all', 
         polarizations = [x for x in polarizations if x in id.polarizations]
     else:
         raise RuntimeError('polarizations must be of type str or list')
-
+    print("bli 9")
     if externalDEMFile is None and externalDEMNoDataValue is None:
         externalDEMNoDataValue = 0.
-
+    print("bli 10")
     if tmpdir is None:
         tmpdir = outdir
 
     ############################################
-
+    print("bli 11", polarizations, swaths)
     for pol in polarizations:
         for iw in swaths:
             print("coherence -> ", iw, pol)
