@@ -1057,10 +1057,13 @@ def halpha(infile, swaths=["IW1", "IW2", "IW3"], t_srs=4326, demName='SRTM 1Sec 
 
     ############################################
     # merge sub-swaths node configuration
-    merge = parse_node("TOPSAR-Merge")
-    merge.parameters["selectedPolarisations"] = id.polarizations
-    workflow.insert_node(merge, before=reads)
-    last = merge
+    if len(reads)>1:
+        merge = parse_node("TOPSAR-Merge")
+        merge.parameters["selectedPolarisations"] = id.polarizations
+        workflow.insert_node(merge, before=reads)
+        last = merge
+    else:
+        last = reads[0]
 
     ############################################
     # create C2 covariance matrix
@@ -1401,11 +1404,15 @@ def insar_coherence(infiles, swaths=["IW1", "IW2", "IW3"], polarizations='all', 
             reads.append(read.id)
 
         ############################################
+        print(reads)
         # merge sub-swaths node configuration
-        merge = parse_node("TOPSAR-Merge")
-        merge.parameters["selectedPolarisations"] = pol
-        workflow.insert_node(merge, before=reads)
-        last = merge
+        if len(reads)>1:
+            merge = parse_node("TOPSAR-Merge")
+            merge.parameters["selectedPolarisations"] = pol
+            workflow.insert_node(merge, before=reads)
+            last = merge
+        else:
+            last = reads[0]
 
         ############################################
         # Multilook node configuration
