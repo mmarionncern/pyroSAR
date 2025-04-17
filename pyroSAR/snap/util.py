@@ -14,6 +14,7 @@
 import os
 import re
 import datetime as dt
+import numpy as np
 from subprocess import Popen
 import shutil
 import traceback
@@ -626,7 +627,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
                 exp['name'] = area
                 exp['type'] = 'float32'
                 exp['expression'] = expression
-                exp['noDataValue'] = 0.0
+                exp['noDataValue'] = np.nan
 
                 if len(refarea) > 1:
                     bm_tc.source = bm_tc.source + [math.id]
