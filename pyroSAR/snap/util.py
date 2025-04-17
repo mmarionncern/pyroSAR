@@ -584,6 +584,11 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
     basename = os.path.join(tmpdir, id.outname_base(basename_extensions))
     outname = basename + '_' + suffix
 
+    nodata = parse_node("SetNoDataValue")
+    write.parameters['noDataValue'] = np.nan
+    workflow.insert_node(nodata, before=last.id)
+    last = nodata
+                
     write = parse_node('Write')
     workflow.insert_node(write, before=last.id)
     write.parameters['file'] = outname
@@ -660,7 +665,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
                 exp['name'] = ratio
                 exp['type'] = 'float32'
                 exp['expression'] = expression
-                exp['noDataValue'] = 0.0
+                exp['noDataValue'] = np.nan
 
                 if len(refarea) > 1:
                     bm_tc.source = bm_tc.source + [math.id]
@@ -1173,6 +1178,11 @@ def halpha(infile, swaths=["IW1", "IW2", "IW3"], t_srs=4326, demName='SRTM 1Sec 
     basename = os.path.join(tmpdir, id.outname_base(basename_extensions))
     outname = basename + '_' + suffix
 
+    nodata = parse_node("SetNoDataValue")
+    write.parameters['noDataValue'] = np.nan
+    workflow.insert_node(nodata, before=last.id)
+    last = nodata
+                    
     write = parse_node('Write')
     workflow.insert_node(write, before=last.id)
     write.parameters['file'] = outname
@@ -1442,6 +1452,11 @@ def insar_coherence(infiles, swaths=["IW1", "IW2", "IW3"], polarizations='all', 
         basename = os.path.join(tmpdir, id_1.outname_base(basename_extensions))
         outname = f"{basename}_{pol}_{suffix}"
 
+        nodata = parse_node("SetNoDataValue")
+        write.parameters['noDataValue'] = np.nan
+        workflow.insert_node(nodata, before=last.id)
+        last = nodata
+        
         write = parse_node('Write')
         workflow.insert_node(write, before=last.id)
         write.parameters['file'] = outname
