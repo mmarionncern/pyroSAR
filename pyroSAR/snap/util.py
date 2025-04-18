@@ -332,6 +332,8 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
             pass
         else:
             raise RuntimeError('acquisition mode {} not supported'.format(id.acquisition_mode))
+    else:
+        swaths = None
 
     bandnames = dict()
     bandnames['beta0'] = ['Beta0_' + x for x in polarizations]
@@ -350,7 +352,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
     collect = []
     for i in range(0, len(infile)):
 
-        if len(swaths) != 3:
+        if swaths is not None and len(swaths) != 3:
             swath_ids = []
             for iw in swaths:
 
