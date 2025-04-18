@@ -14,10 +14,8 @@
 import os
 import re
 import datetime as dt
-import numpy as np
 from subprocess import Popen
 import shutil
-import traceback
 from ..drivers import identify, identify_many, ID
 from .auxil import parse_recipe, parse_node, gpt, groupbyWorkers, writer, \
     windows_fileprefix, orb_parametrize, geo_parametrize, sub_parametrize, \
@@ -351,18 +349,46 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
     last = None
     collect = []
     for i in range(0, len(infile)):
-        ############################################
-        # Read node configuration
-        read = parse_node('Read')
-        workflow.insert_node(read)
 
-        if not use_manifest_file:
-            read.parameters['file'] = ids[i].scene
+        if len(swaths) != 3:
+            swath_ids = []
+            for iw in swaths:
+
+                ############################################
+                # Read node configuration
+                read = parse_node('Read')
+                workflow.insert_node(read)
+
+                if not use_manifest_file:
+                    read.parameters['file'] = ids[i].scene
+                else:
+                    read.parameters['file'] = ids[i].scene.split(".")[0] + ".SAFE/manifest.safe"
+
+                ############################################
+                # TOP-SAR split
+                ts_split = parse_node('TOPSAR-Split')
+                workflow.insert_node(ts_split, before=read.id)
+                ts_split.parameters["subswath"] = iw
+                ts_split.parameters["selectedPolarisations"] = polarizations
+                swath_ids.append(ts_split.id)
+
+            merge = parse_node("TOPSAR-Merge")
+            merge.parameters["selectedPolarisations"] = id.polarizations
+            workflow.insert_node(merge, before=swath_ids)
+            last = merge.id
         else:
-            read.parameters['file'] = ids[i].scene.split(".")[0] + ".SAFE/manifest.safe"
+            ############################################
+            # Read node configuration for all swaths
+            read = parse_node('Read')
+            workflow.insert_node(read)
 
-        # read.parameters['formatName'] = formatName
-        last = read
+            if not use_manifest_file:
+                read.parameters['file'] = ids[i].scene
+            else:
+                read.parameters['file'] = ids[i].scene.split(".")[0] + ".SAFE/manifest.safe"
+            # read.parameters['formatName'] = formatName
+            last = read
+
         ############################################
         # Remove-GRD-Border-Noise node configuration
         if id.sensor in ['S1A', 'S1B'] and id.product == 'GRD' and removeS1BorderNoise:
