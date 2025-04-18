@@ -372,12 +372,15 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
                 workflow.insert_node(ts_split, before=read.id)
                 ts_split.parameters["subswath"] = iw
                 ts_split.parameters["selectedPolarisations"] = polarizations
-                swath_ids.append(ts_split.id)
+                swath_ids.append(ts_split)
 
-            merge = parse_node("TOPSAR-Merge")
-            merge.parameters["selectedPolarisations"] = id.polarizations
-            workflow.insert_node(merge, before=swath_ids)
-            last = merge.id
+            if len(swaths) > 1:
+                merge = parse_node("TOPSAR-Merge")
+                merge.parameters["selectedPolarisations"] = id.polarizations
+                workflow.insert_node(merge, before=[x.id for x in swath_ids])
+                last = merge
+            else:
+                last = swath_ids[0]
         else:
             ############################################
             # Read node configuration for all swaths
