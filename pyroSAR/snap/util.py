@@ -1105,7 +1105,7 @@ def halpha(infile, swaths=["IW1", "IW2", "IW3"], t_srs=4326, demName='SRTM 1Sec 
     ############################################
     # create C2 covariance matrix
     pol_m = parse_node("Polarimetric-Matrices")
-    workflow.insert_node(pol_m, before=last_id)
+    workflow.insert_node(pol_m, before=last)
     pol_m.parameters["matrix"] = "C2"
     last = pol_m
     bands = ["C11", "C12_real", "C12_imag", "C22"]
