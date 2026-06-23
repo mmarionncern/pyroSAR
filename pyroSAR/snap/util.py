@@ -1106,7 +1106,7 @@ def halpha(infile, swaths=["IW1", "IW2", "IW3"], t_srs=4326, demName='SRTM 1Sec 
     ############################################
     # create C2 covariance matrix
     pol_m = parse_node("Polarimetric-Matrices")
-    workflow.insert_node(pol_m, before=last_id)
+    workflow.insert_node(pol_m, before=last)
     pol_m.parameters["matrix"] = "C2"
     last = pol_m
     bands = ["C11", "C12_real", "C12_imag", "C22"]
@@ -1304,7 +1304,7 @@ def insar_coherence(infiles, swaths=["IW1", "IW2", "IW3"], polarizations='all', 
     delta_t = (dt.datetime.strptime(id_2.start, "%Y%m%dT%H%M%S") -
                dt.datetime.strptime(id_1.start, "%Y%m%dT%H%M%S")).total_seconds()
     for i in range(1, 5):
-        delta_t = delta_t - i * 12 * 86400
+        delta_t = delta_t - 12 * 86400
         if (delta_t <= 10 and delta_t >= -10):
             break
 
