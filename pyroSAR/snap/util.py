@@ -485,6 +485,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
     ############################################
     # Terrain-Flattening node configuration
     tf = None
+    print("Terrain flattening", terrainFlattening)
     if terrainFlattening:
         tf = parse_node('Terrain-Flattening')
         workflow.insert_node(tf, before=last.id)
