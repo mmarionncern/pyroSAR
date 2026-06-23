@@ -1,13 +1,22 @@
+geoalchemy2>=0.14.0
+lxml
+numpy
+packaging
+pillow
 progressbar2
-numpy<2.0
-spatialist>=0.12.1
+psutil
+psycopg2
 pyyaml
 requests
-psycopg2
-SQLAlchemy>=1.4,<2.0
-SQLAlchemy-Utils>=0.37
-GeoAlchemy2<0.14.0
-Pillow
-lxml
-packaging
+# psycopg2
+# SQLAlchemy>=1.4,<2.0
+# SQLAlchemy-Utils>=0.37
+# GeoAlchemy2<0.14.0
+# Pillow
+# lxml
+# packaging
+shapely
+spatialist>=0.17.0
+sqlalchemy-utils>=0.37,<0.42
+sqlalchemy>=1.4
 

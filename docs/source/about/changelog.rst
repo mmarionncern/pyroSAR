@@ -1036,10 +1036,7 @@ Ancillary Tools
 
 Auxiliary Data Handling
 -----------------------
-
-changes to Sentinel-1 OSV data handling:
-
-- function :meth:`pyroSAR.auxdata.dem_create`:
+- function :func:`pyroSAR.auxdata.dem_create`:
 
   + make use of new classes :class:`~pyroSAR.ancillary.Lock` and :class:`~pyroSAR.ancillary.LockCollection`
     for DEM download and mosaic creation (new argument `lock_timeout`)
@@ -1071,3 +1068,371 @@ SNAP API
 Auxiliary Data Handling
 -----------------------
 - class :class:`pyroSAR.auxdata.DEMHandler`: lock created VRT files
+
+0.27.0 | 2024-12-19
+===================
+
+Auxiliary Data Handling
+-----------------------
+- class :class:`pyroSAR.S1.OSV`: fixed bug in searching STEP OSV repository
+- function :func:`pyroSAR.auxdata.dem_create`: removed argument `lock_timeout`, do no longer lock the target file.
+- function :func:`pyroSAR.auxdata.dem_autoload`: the target VRT file is no longer locked. However, the individual downloaded DEM tiles now are.
+
+Ancillary Tools
+---------------
+- classes :class:`~pyroSAR.ancillary.Lock` and :class:`~pyroSAR.ancillary.LockCollection`:
+  enable nested locking
+
+Misc
+----
+- removed upper Python dependency limit
+
+0.28.0 | 2025-02-20
+===================
+
+General
+-------
+- support for SNAP 11 (tested, no modifications necessary)
+- support for Sentinel-1C and D
+
+Drivers
+-------
+- function :func:`pyroSAR.drivers.identify_many`: new argument `cores` for parallel scene identification
+- class :class:`pyroSAR.drivers.SAFE`: enable unzipping of products from CDSE
+
+Auxiliary Data Handling
+-----------------------
+- removed option for `TDX90m` DEM download because the FTP server has been shut down
+  (perhaps reactivated in the future if HTTPS authentication can be implemented)
+
+0.29.0 | 2025-04-09
+===================
+
+General
+-------
+- extended support for Sentinel-1C and D
+
+Drivers
+-------
+- :meth:`pyroSAR.drivers.SAFE.geo_grid`: new method
+
+0.29.1 | 2025-05-12
+===================
+
+SNAP API
+--------
+- support for SNAP 12
+
+0.30.0 | 2025-05-14
+===================
+
+Drivers
+-------
+- changed polygon coordinate order to counter-clockwise for methods
+
+  - :meth:`pyroSAR.drivers.ID.bbox`
+  - :meth:`pyroSAR.drivers.ID.geometry`
+- method :meth:`pyroSAR.drivers.Archive.select`: new argument `return_value`
+
+0.30.1 | 2025-08-22
+===================
+
+Drivers
+-------
+- :class:`~pyroSAR.drivers.ESA`: read all `GEOLOCATION GRID ADS` segments to obtain GCPs, not just the first one (bugfix)
+
+GAMMA API
+---------
+- support for GAMMA version 20250625
+- support for polar stereographic projections (via :meth:`~pyroSAR.gamma.auxil.ISPPar.envidict`)
+- class :class:`~pyroSAR.gamma.auxil.ISPPar`: raise error if file type is unknown
+  (instead of setting the `filetype` attribute to `unknown`)
+- :func:`~pyroSAR.gamma.util.pixel_area_wrap`:
+
+  + create ENVI HDR files for inputs to :func:`~pyroSAR.gamma.util.lat_ratio` (bugfix)
+  + fixed bug in ignoring conditions for writing ENVI HDR files of `pix*` and `gs_ratio` products
+
+- improved readability of tests
+
+0.31.0 | 2025-09-23
+===================
+
+Drivers
+-------
+- :meth:`pyroSAR.drivers.ID.bbox`: new argument `buffer`
+- :class:`~pyroSAR.drivers.SAFE`, :class:`~pyroSAR.drivers.BEAM_DIMAP`: new argument `looks`
+- :class:`~pyroSAR.drivers.Archive`: context-manage all database handles (code improvement)
+
+GAMMA API
+---------
+- :func:`~pyroSAR.gamma.util.convert2gamma`, :func:`~pyroSAR.gamma.util.correctOSV`: add file locking
+- fixed argument names of `isp.MLI_cat`
+
+0.32.0 | 2025-10-29
+===================
+
+SNAP API
+--------
+- :func:`~pyroSAR.snap.auxil.orb_parametrize`: improved ERS/ASAR orbit handling (more work necessary to always select the best available file, because all options are limited in time (e.g. use option 1 if possible, fall back to option 2 otherwise, etc.); needs a download functionality like :class:`pyroSAR.S1.auxil.OSV` to know which ones are available)
+- :func:`~pyroSAR.snap.util.geocode`:
+
+  + explicitly use 'Latest Auxiliary File' for Envisat calibration (just for readability, this is already the default value of the parsed node; other options: 'Product Auxiliary File', 'External Auxiliary File')
+  + leave calibration node polarizations field empty when processing all polarizations (otherwise processing may finish without errors but no product is being written; looks like a SNAP bug, also reported in `step-44830 <https://forum.step.esa.int/t/naming-of-source-bands/44830>`_)
+  + `Calibration` in/out band handling improvements
+
+    * select source bands based on sensor and acquisition mode (also described in `step-44830 <https://forum.step.esa.int/t/naming-of-source-bands/44830>`_)
+    * more explicit handling of output bands: all that are not needed set to `False`
+    * commented out output bands that are apparently not needed
+
+  + fixed sarsim-cc geocoding:
+
+    * old: `SAR-Simulation->Cross-Correlation->Terrain-Flattening->SARSim-Terrain-Correction` (does not work because `Terrain-Flattening` does not pass through any source layers)
+    * new: `SAR-Simulation->Cross-Correlation->Warp->Terrain-Flattening->Terrain-Correction`
+    * this reveals a flaw in current SNAP processing: the additional `Warp` step introduces unnecessary resampling, the created lookup table is not passed between operators and thus makes the process inefficient, the whole procedure only works with EPSG:4326 as map geometry thus, by the looks of it, requiring three forward geocoding steps (for `SAR-Simulation`, `Terrain-Flattening` and `Terrain-Correction`, respectively)
+
+- :func:`~pyroSAR.snap.auxil.groupbyWorkers`: add `Warp` operator to the group of its source node, because it cannot be executed alone (just like `ThermalNoiseRemoval`)
+- ancillary layer writing fix: a layover-shadow-mask can also be created by `SAR-Simulation`, but the output layer is named differently ('layover_shadow_mask' instead of 'layoverShadowMask' by `Terrain-Correction`); this must be handled correctly in :func:`pyroSAR.snap.auxil.writer`
+
+Drivers
+-------
+- :class:`~pyroSAR.drivers.ESA`:
+
+  + :meth:`~pyroSAR.drivers.ESA.scanMetadata`:
+
+    * read out all MPH, SPH, DSD and GEOLOCATION_GRID_ADS metadata and expose it via `meta['origin']`
+    * use absolute orbit number as `frameNumber` instead of product counter (which often seems to be 0)
+    * convert original metadata to Python types (int, float, datetime)
+    * renamed several meta attributes:
+
+      - `incidenceAngleMin` -> `incidence_nr`
+      - `incidenceAngleMax` -> `incidence_fr`
+      - `rangeResolution`, `azimuthResolution` -> `resolution` (tuple)
+      - `neszNear`, `neszFar` -> `nesz` (tuple)
+
+  + new method :meth:`~pyroSAR.drivers.ESA.geo_grid` (like for `SAFE`)
+  + corrected `acquisition_mode` for ASAR WSM, WSS
+  + added MR product type
+
+- :class:`~pyroSAR.drivers.BEAM_DIMAP`
+
+  + improved metadata parsing
+
+    * `incidenceAngleMidSwath` not always present, use `incidence_near` and `incidence_far` alternatively
+    * the cycle number may be named `orbit_cycle` or `CYCLE`
+    * for pyroSAR `frameNumber`, use `ABS_ORBIT`, not `data_take_id` as for Sentinel-1
+    * added further `meta` attributes: `swath`, `looks`
+    * always four `Polarizations` fields present, some may be set to None -> filtered out
+    * for Sentinel-1 the product and acquisition_mode attributes can be obtained from `ACQUISITION_MODE` and `PRODUCT_TYPE` respectively; for ASAR/ERS `ACQUISITION_MODE` is missing and `PRODUCT_TYPE` contains the original values, e.g. 'ASA_APP_1P' -> must be abstracted
+
+  + added MR product type
+
+- :class:`~pyroSAR.drivers.ID`
+
+  + added methods `start_dt` and `stop_dt` returning timezone-aware datetime objects
+
+Ancillary Tools
+---------------
+
+- :meth:`~pyroSAR.ancillary.multilook_factors`: fixed bug in returning 0 as range factor
+
+0.32.1 | 2025-11-06
+===================
+
+Auxiliary Data Handling
+-----------------------
+- class :class:`pyroSAR.S1.OSV`: lock local target files for download (to avoid multi-download and conflicts in parallel processes)
+
+0.33.0 | 2025-12-17
+===================
+
+Drivers
+-------
+- :class:`~pyroSAR.drivers.ESA`:
+
+    + convert coordinates in `meta['origin']` to floats
+    + read incident angles directly from metadata, not from custom mapping `ANGLES_RESOLUTION` (from which they have been removed)
+    + `ERS.mapping` renaming:
+
+          * `ANGLES_RESOLUTION` -> `RESOLUTION_NESZ`
+          * `get_angles_resolution` -> `get_resolution_nesz`
+          * `range` -> `res_rg`
+          * `azimuth` -> `res_az`
+          * `nesz_near` -> `nesz_nr`
+          * `nesz_far` -> `nesz_fr`
+
+    + made code more robust by reading SPH and DSD sizes from MPH
+    + added WSS mode to `RESOLUTION_NESZ` (although all values are just `None` because they could not be found yet)
+    + simplified code and added typing
+
+- :class:`~pyroSAR.drivers.BEAM_DIMAP`:
+
+    + more robust incident angle reading
+
+SNAP API
+--------
+- support for SNAP 13
+
+Ancillary Tools
+---------------
+
+- :meth:`~pyroSAR.ancillary.multilook_factors`: complete reimplementation for more robustness
+
+Auxiliary Data Handling
+-----------------------
+- class :class:`pyroSAR.auxdata.DEMHandler`: handle ocean areas without DEM coverage using a dummy DEM spanning the target extent instead of the whole globe. The latter is no longer supported by GDAL.
+
+0.33.1 | 2026-01-19
+===================
+
+Drivers
+-------
+- :meth:`pyroSAR.drivers.SAFE.geo_grid`: fixed datetime handling bug by requiring spatialist>=0.16.2
+
+0.33.2 | 2026-01-21
+===================
+
+Auxiliary Data Handling
+-----------------------
+- :meth:`S1.OSV.__catch_step_auxdata` do not stop if no file was found on first URL
+
+0.33.3 | 2026-01-30
+===================
+
+GAMMA API
+---------
+- :class:`pyroSAR.gamma.auxil.ISPPar`: fixed `date` attribute handling
+
+0.34.0 | 2026-02-12
+===================
+
+Drivers
+-------
+- :class:`~pyroSAR.drivers.CEOS_PSR`: add new `meta` attributes `heading` and `heading_scene`
+
+Auxiliary Data Handling
+-----------------------
+- enable global search (the parameter `geometries` is now optional)
+- generation of local indices to reduce web traffic
+- option to work in offline mode
+
+Ancillary Tools
+---------------
+- class :class:`~pyroSAR.ancillary.Lock`: fixed bug where lock file would remain on error if target does not exist
+
+SNAP API
+--------
+- :meth:`pyroSAR.examine.ExamineSnap.get_version`: more robust mechanism to read version information.
+  Only the version is returned as string now (instead of a dictionary with version and release date).
+
+- :meth:`pyroSAR.examine.SnapProperties`: support for `snap.conf` files
+
+0.34.1 | 2026-02-12
+===================
+
+SNAP API
+--------
+- :class:`pyroSAR.examine.ExamineSnap`: restore Python 3.10 compatibility (f-string parsing issue)
+
+0.34.2 | 2026-02-13
+===================
+
+Ancillary Tools
+---------------
+- restored Python 3.10 compatibility (import `typing_extensions.Self` instead of `typing.Self` if necessary)
+
+0.34.3 | 2026-02-17
+===================
+
+SNAP API
+--------
+- :class:`pyroSAR.examine.ExamineSnap`: do not call SNAP to read version info in `__init__`
+
+Auxiliary Data Handling
+-----------------------
+- handle empty URL lists in `DEMHandler.__retrieve`
+
+0.34.4 | 2026-03-03
+===================
+
+SNAP API
+--------
+- :func:`pyroSAR.snap.auxil.erode_edges`: explictly open BEAM-DIMAP .img files with the ENVI driver.
+  This was necessary because GDAL 3.12 introduces a new `MiraMonRaster` driver, which is used per default for .img files.
+
+Drivers
+-------
+- use `MEM` instead of `Memory` as driver for creating in-memory :class:`spatialist.vector.Vector` objects. `Memory` has been deprecated.
+
+0.34.5 | 2026-03-06
+===================
+
+SNAP API
+--------
+- :meth:`pyroSAR.examine.ExamineSnap.get_version`: fixed bug where the X11 environment variable `DISPLAY` was preventing SNAP to start
+
+GAMMA API
+---------
+- handle subprocess signal kills like segmentation fault (SIGSEGV). Before these were just passed through, now a `RuntimeError` is raised.
+
+0.35.0 | 2026-03-09
+===================
+
+Archive
+-------
+- new module :mod:`pyroSAR.archive` extracted from :mod:`pyroSAR.drivers`
+- new protocol class :class:`pyroSAR.archive.SceneArchive` to establish an interface for scene search classes (inherited by :class:`pyroSAR.archive.Archive`).
+- method `Archive.encode` has been renamed to :meth:`~pyroSAR.archive.Archive.to_str` and has been reimplemented to be more predictable
+
+Drivers
+-------
+- :class:`~pyroSAR.drivers.ID`: deleted method `export2sqlite`
+
+0.36.0 | 2026-03-10
+===================
+
+GAMMA API
+---------
+
+- :func:`pyroSAR.gamma.dem.dem_import`:
+
+    + add `shellscript` argument
+    + consistently pass `logpath`, `outdir` and `shellscript` to GAMMA commands
+
+- :func:`pyroSAR.gamma.auxil.process`:
+
+    + replace environment variable `base` in the `shellscript` with `OUTDIR` and corrected its usage.
+      Before, the value of `outdir` in the command was just replaced with `$base`.
+      This lead to wrong scripts whenever different values for `outdir` were passed to `process`.
+      Now, no global variable is set and `OUTDIR` is redefined whenever the value of `outdir` changes, e.g.
+
+      .. code-block:: bash
+
+          OUTDIR=/xyz
+          command1 $OUTDIR
+          command2 $OUTDIR
+          OUTDIR=/abc
+          command3 $OUTDIR
+
+    + bugfix: the file header and the declaration of `GAMMA_HOME` are now written to the file even if `outdir=None`
+
+0.36.1 | 2026-03-24
+===================
+
+GAMMA API
+---------
+
+- :func:`pyroSAR.gamma.util.convert2gamma`: fix error in not removing thermal noise due to GAMMA interface change
+
+0.36.2 | 2026-04-20
+===================
+
+GAMMA API
+---------
+
+- Do not write `nan` to output files and remove written files on error for:
+
+    + :func:`pyroSAR.gamma.util.lat_linear_to_db`
+    + :func:`pyroSAR.gamma.util.lat_product`
+    + :func:`pyroSAR.gamma.util.lat_ratio`
+
+- Replace usage of removed function :func:`spatialist.ancillary.which`

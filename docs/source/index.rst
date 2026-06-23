@@ -24,8 +24,9 @@ API Documentation
     :maxdepth: 1
 
     api/drivers
+    api/archive
     api/snap
-    api/gamma
+    api/gamma/index
     api/sentinel-1
     api/auxdata
     api/datacube

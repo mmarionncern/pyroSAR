@@ -1,7 +1,7 @@
 ###############################################################################
 # Convenience functions for SAR image batch processing with ESA SNAP
 
-# Copyright (c) 2016-2024, the pyroSAR Developers.
+# Copyright (c) 2016-2025, the pyroSAR Developers.
 
 # This file is part of the pyroSAR Project. It is subject to the
 # license terms in the LICENSE.txt file found in the top-level
@@ -20,8 +20,6 @@ from ..drivers import identify, identify_many, ID
 from .auxil import parse_recipe, parse_node, gpt, groupbyWorkers, writer, \
     windows_fileprefix, orb_parametrize, geo_parametrize, sub_parametrize, \
     mli_parametrize, dem_parametrize
-
-from spatialist.ancillary import dissolve
 
 import logging
 
@@ -273,7 +271,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
 
     if id.sensor in ['ASAR', 'ERS1', 'ERS2']:
         formatName = 'ENVISAT'
-    elif id.sensor in ['S1A', 'S1B', "S1C", "S1D"]:
+    elif re.search('S1[A-Z]', id.sensor):
         if id.product == 'SLC':
             removeS1BorderNoise = False
             process_S1_SLC = True
@@ -349,6 +347,9 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
         infile = [infile]
 
     last = None
+    bands = []
+    bands_extra = []
+    pol_ref = polarizations[0]
     collect = []
     for i in range(0, len(infile)):
 
@@ -396,7 +397,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
 
         ############################################
         # Remove-GRD-Border-Noise node configuration
-        if id.sensor in ['S1A', 'S1B'] and id.product == 'GRD' and removeS1BorderNoise:
+        if id.sensor in ['S1A', 'S1B', 'S1C', 'S1D'] and id.product == 'GRD' and removeS1BorderNoise:
             bn = parse_node('Remove-GRD-Border-Noise')
             workflow.insert_node(bn, before=last.id)
             bn.parameters['selectedPolarisations'] = polarizations
@@ -405,7 +406,26 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
         # Calibration node configuration
         cal = parse_node('Calibration')
         workflow.insert_node(cal, before=last.id)
-        cal.parameters['selectedPolarisations'] = polarizations
+        cal.parameters['auxFile'] = 'Latest Auxiliary File'
+        # leave the selectedPolarisations field empty when processing all polarizations
+        if len(polarizations) == len(id.polarizations):
+            polarizations_cal = None
+        else:
+            polarizations_cal = polarizations
+        cal.parameters['selectedPolarisations'] = polarizations_cal
+        # choose the intensity band(s)
+        c1 = id.sensor == 'ASAR' and id.acquisition_mode in ['IMP', 'WSM']
+        c2 = id.sensor in ['ERS1', 'ERS2']
+        if c1 or c2:
+                cal.parameters['sourceBands'] = 'Intensity'
+        else:
+            cal.parameters['sourceBands'] = [f'Intensity_{x}' for x in polarizations]
+        
+        cal.parameters['outputBetaBand'] = False
+        cal.parameters['outputSigmaBand'] = False
+        cal.parameters['outputGammaBand'] = False
+        cal.parameters['createBetaBand'] = False
+        cal.parameters['createGammaBand'] = False
         if isinstance(refarea, str):
             refarea = [refarea]
         for item in refarea:
@@ -413,18 +433,25 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
                 raise ValueError('unsupported value for refarea: {}'.format(item))
         if terrainFlattening:
             cal.parameters['outputBetaBand'] = True
-            cal.parameters['outputSigmaBand'] = False
         else:
             for opt in refarea:
                 cal.parameters['output{}Band'.format(opt[:-1].capitalize())] = True
-        if id.sensor in ['ERS1', 'ERS2', 'ASAR']:
-            cal.parameters['createBetaBand'] = True
-        if len(decompositions) != 0:
-            cal.parameters['outputImageInComplex'] = True
+
+        # if id.sensor in ['ERS1', 'ERS2', 'ASAR']:
+        #     cal.parameters['createBetaBand'] = True
+        # if len(decompositions) != 0:
+        #     cal.parameters['outputImageInComplex'] = True
+        # I don't think this is needed (introduced by Ricardo Noguera some while ago)
+        # if id.sensor in ['ERS1', 'ERS2', 'ASAR']:
+        #     cal.parameters['createBetaBand'] = True
+        if len(bands) == 0:
+            bands = [x for x in ['Beta', 'Sigma', 'Gamma']
+                     if cal.parameters[f'output{x}Band'] == 'true']
+            bands = [f'{x}0_{pol}' for x in bands for pol in polarizations]
         last = cal
         ############################################
         # ThermalNoiseRemoval node configuration
-        if id.sensor in ['S1A', 'S1B'] and removeS1ThermalNoise:
+        if id.sensor in ['S1A', 'S1B', 'S1C', 'S1D'] and removeS1ThermalNoise:
             tn = parse_node('ThermalNoiseRemoval')
             workflow.insert_node(tn, before=last.id)
             tn.parameters['selectedPolarisations'] = polarizations
@@ -446,8 +473,9 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
         last = deb
     ############################################
     # Apply-Orbit-File node configuration
+    continue_on_fail = False
     orb = orb_parametrize(scene=id, formatName=formatName, allow_RES_OSV=allow_RES_OSV,
-                          url_option=s1_osv_url_option)
+                          url_option=s1_osv_url_option, continueOnFail=continue_on_fail)
     workflow.insert_node(orb, before=last.id)
     last = orb
     ############################################
@@ -468,12 +496,12 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
         bands = ["C11", "C12_real", "C12_imag", "C22"]
     ############################################
     # Multilook node configuration
-    if id.sensor in ['ERS1', 'ERS2', 'ASAR']:
-        bands = bandnames['beta0'] + bandnames['sigma0']
-    else:
-        bands = None
-    ml = mli_parametrize(scene=id, spacing=spacing, rlks=rlks, azlks=azlks,
-                         sourceBands=bands)
+    # I don't think this is needed (introduced by Ricardo Noguera some while ago)
+    # if id.sensor in ['ERS1', 'ERS2', 'ASAR']:
+    #     bands = bandnames['beta0']
+    # else:
+    ml = mli_parametrize(scene=id, spacing=spacing, rlks=rlks,
+                         azlks=azlks, sourceBands=bands)
     if ml is not None:
         workflow.insert_node(ml, before=last.id)
         last = ml
@@ -483,13 +511,36 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
         if not speckleFilter:
             last_ids.append(pol_m.id)
     ############################################
+    # geocoding node(s) configuration
+    tc_options = ['incidenceAngleFromEllipsoid',
+                  'localIncidenceAngle',
+                  'projectedLocalIncidenceAngle',
+                  'DEM',
+                  'layoverShadowMask']
+    if export_extra is not None:
+        tc_export_extra = [x for x in export_extra if x in tc_options]
+    else:
+        tc_export_extra = None
+    tc = geo_parametrize(spacing=spacing, t_srs=t_srs,
+                         tc_method=geocoding_type, sourceBands=bands,
+                         alignToStandardGrid=alignToStandardGrid,
+                         standardGridOriginX=standardGridOriginX,
+                         standardGridOriginY=standardGridOriginY,
+                         export_extra=tc_export_extra)
+    if isinstance(tc, list):
+        sarsim, cc, warp, tc = tc
+        workflow.insert_node([sarsim, cc, warp], before=last.id)
+        last = warp
+    ############################################
     # Terrain-Flattening node configuration
     tf = None
     print("Terrain flattening", terrainFlattening)
     if terrainFlattening:
         tf = parse_node('Terrain-Flattening')
         workflow.insert_node(tf, before=last.id)
-        tf.parameters['sourceBands'] = bandnames['beta0']
+        sources = [x for x in bands if x.startswith('Beta')]
+        tf.parameters['sourceBands'] = sources
+        bands = [x.replace('Beta', 'Gamma') for x in bands]
         tf.parameters['oversamplingMultiple'] = dem_oversampling_multiple
         if 'reGridMethod' in tf.parameters.keys():
             if externalDEMFile is None:
@@ -499,10 +550,13 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
         if 'sigma0' in refarea:
             try:
                 tf.parameters['outputSigma0'] = True
+                bands_sigma = [x.replace('Gamma', 'Sigma') for x in bands]
+                bands.extend(bands_sigma)
             except KeyError:
                 raise RuntimeError("The Terrain-Flattening node does not accept "
                                    "parameter 'outputSigma0'. Please update SNAP.")
         last = tf
+    
     ############################################
     # Speckle-Filter node configuration
     speckleFilter_options = ['Boxcar',
@@ -571,18 +625,34 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
         gamma_index = sources.index('Terrain-Flattening')
         sigma_index = abs(gamma_index - 1)
         s1_id = os.path.basename(os.path.splitext(id.scene)[0])
+        # =======
+        #     # - Gamma0_* bands from Terrain-Flattening
+        #     # - layover_shadow_mask from SAR-Simulation
+    
+        #     def bandmerge(basename, band_dict, workflow, subset=False):
+        # >>>>>>> 1297ec2d3a4ff59dca6df0dfa4c64f1629ae8471
         bands_long = []
-        for band in bands:
-            comp = [band + '::']
-            if shapefile is not None:
-                comp.append('Subset_')
-            comp.append(s1_id)
-            if band.startswith('Gamma'):
-                comp.append('_' + workflow.suffix(stop=sources[gamma_index]))
-            else:
-                comp.append('_' + workflow.suffix(stop=sources[sigma_index]))
-            bands_long.append(''.join(comp))
-        bm_tc.parameters['sourceBands'] = bands_long
+        for node, bands in band_dict.items():
+            if not isinstance(bands, list):
+                raise RuntimeError("The values of the 'band_dict' parameter must be a list.")
+            for band in bands:
+                comp = [band + '::']
+                if subset:
+                    comp.append('Subset_')
+                comp.append(basename)
+                comp.append('_' + workflow.suffix(stop=node))
+                bands_long.append(''.join(comp))
+        merge = parse_node('BandMerge')
+        merge.parameters['sourceBands'] = bands_long
+        return merge
+    
+    bm_tc = None
+    if terrainFlattening and len(bands_extra) > 0:
+        basename = os.path.basename(os.path.splitext(id.scene)[0])
+        band_dict = {'Terrain-Flattening': bands,
+                     tf.source: bands_extra}
+        bm_tc = bandmerge(basename, band_dict, workflow, subset=False)
+        workflow.insert_node(bm_tc, before=[last.source, last.id])
         last = bm_tc
         last_ids.append(last.id)
     ############################################
@@ -628,20 +698,12 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
     ############################################
     ############################################
     if export_extra is not None:
-        tc_options = ['incidenceAngleFromEllipsoid',
-                      'localIncidenceAngle',
-                      'projectedLocalIncidenceAngle',
-                      'DEM',
-                      'layoverShadowMask']
-        tc_selection = []
         for item in export_extra:
             if item in tc_options:
-                key = 'save{}{}'.format(item[0].upper(), item[1:])
-                tc.parameters[key] = True
                 if item == 'DEM':
-                    tc_selection.append('elevation')
+                    bands_extra.append('elevation')
                 else:
-                    tc_selection.append(item)
+                    bands_extra.append(item)
             elif item == 'scatteringArea':
                 if not terrainFlattening:
                     raise RuntimeError('scatteringArea can only be created if terrain flattening is performed')
@@ -659,14 +721,36 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
                 area = 'scatteringArea_{0}'.format(pol)
                 expression = 'Beta0_{0} / Gamma0_{0}'.format(pol)
 
+                # base = os.path.basename(os.path.splitext(id.scene)[0])
+                # subset = shapefile is not None
+                # band_dict = {'Terrain-Flattening': [f'Gamma0_{pol_ref}'],
+                #              tf.source: [f'Beta0_{pol_ref}']}
+                # merge = bandmerge(basename=base, band_dict=band_dict,
+                #                    workflow=workflow, subset=subset)
+                # workflow.insert_node(merge, before=[tf.id, tf.source],
+                #                      resetSuccessorSource=False)
+                
+                # math = parse_node('BandMaths')
+                # workflow.insert_node(math, before=merge.id, resetSuccessorSource=False)
+                
+                # area = 'scatteringArea_{0}'.format(pol_ref)
+                # expression = 'Beta0_{0} / Gamma0_{0}'.format(pol_ref)
+
                 math.parameters.clear_variables()
                 exp = math.parameters['targetBands'][0]
                 exp['name'] = area
                 exp['type'] = 'float32'
                 exp['expression'] = expression
+<<<<<<< HEAD
                 exp['noDataValue'] = -1000
 
                 if len(refarea) > 1:
+=======
+                exp['noDataValue'] = 0.0
+                
+                # modify the bm_tc band merge node if it exists or create a new band merge node
+                if bm_tc is not None:
+>>>>>>> 1297ec2d3a4ff59dca6df0dfa4c64f1629ae8471
                     bm_tc.source = bm_tc.source + [math.id]
                 else:
                     bm_tc = parse_node('BandMerge')
@@ -676,9 +760,15 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
                 # modify Terrain-Correction source bands
                 tc_bands = tc.parameters['sourceBands'] + ',' + area
                 tc.parameters['sourceBands'] = tc_bands
+<<<<<<< HEAD
 
                 # add scattering Area to list of band directly written from Terrain-Correction
                 tc_selection.append(area)
+=======
+                
+                # add scattering area to the list of bands directly written from Terrain-Correction
+                bands_extra.append(area)
+>>>>>>> 1297ec2d3a4ff59dca6df0dfa4c64f1629ae8471
             elif item == 'gammaSigmaRatio':
                 if not terrainFlattening:
                     raise RuntimeError('gammaSigmaRatio can only be created if terrain flattening is performed')
@@ -687,24 +777,39 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
                                      "must contain both sigma0 and gamma0")
                 math = parse_node('BandMaths')
                 workflow.insert_node(math, before=tf.id, resetSuccessorSource=False)
+<<<<<<< HEAD
 
                 pol = polarizations[0]  # the result will be the same for each polarization
                 ratio = 'gammaSigmaRatio_{0}'.format(pol)
                 expression = 'Sigma0_{0} / Gamma0_{0}'.format(pol)
 
+=======
+                
+                ratio = 'gammaSigmaRatio_{0}'.format(pol_ref)
+                expression = 'Sigma0_{0} / Gamma0_{0}'.format(pol_ref)
+                
+>>>>>>> 1297ec2d3a4ff59dca6df0dfa4c64f1629ae8471
                 math.parameters.clear_variables()
                 exp = math.parameters['targetBands'][0]
                 exp['name'] = ratio
                 exp['type'] = 'float32'
                 exp['expression'] = expression
+<<<<<<< HEAD
                 exp['noDataValue'] = -1000
 
                 if len(refarea) > 1:
+=======
+                exp['noDataValue'] = 0.0
+                
+                # modify the bm_tc band merge node if it exists or create a new band merge node
+                if bm_tc is not None:
+>>>>>>> 1297ec2d3a4ff59dca6df0dfa4c64f1629ae8471
                     bm_tc.source = bm_tc.source + [math.id]
                 else:
                     bm_tc = parse_node('BandMerge')
                     workflow.insert_node(bm_tc, before=[tf.id, math.id], resetSuccessorSource=False)
                     tc.source = bm_tc.id
+<<<<<<< HEAD
 
                 # modify Terrain-Correction source bands
                 tc_bands = tc.parameters['sourceBands'] + ',' + ratio
@@ -712,17 +817,25 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
 
                 # add scattering Area to list of band directly written from Terrain-Correction
                 tc_selection.append(ratio)
+=======
+                
+                tc_bands = tc.parameters['sourceBands'] + ',' + ratio
+                tc.parameters['sourceBands'] = tc_bands
+                
+                # add scattering Area to the list of bands directly written from Terrain-Correction
+                bands_extra.append(ratio)
+>>>>>>> 1297ec2d3a4ff59dca6df0dfa4c64f1629ae8471
             else:
                 raise RuntimeError("ID '{}' not valid for argument 'export_extra'".format(item))
         # directly write export_extra layers to avoid dB scaling
-        if scaling in ['db', 'dB'] and len(tc_selection) > 0:
+        if scaling in ['db', 'dB'] and len(bands_extra) > 0:
             tc_write = parse_node('Write')
             workflow.insert_node(tc_write, before=tc.id, resetSuccessorSource=False)
             tc_write.parameters['file'] = outname
             tc_write.parameters['formatName'] = 'ENVI'
             tc_select = parse_node('BandSelect')
             workflow.insert_node(tc_select, after=tc_write.id)
-            tc_select.parameters['sourceBands'] = tc_selection
+            tc_select.parameters['sourceBands'] = bands_extra
     ############################################
     ############################################
     # DEM handling
@@ -882,8 +995,13 @@ def noise_power(infile, outdir, polarizations, spacing, t_srs, refarea='sigma0',
         raise ValueError('refarea not supported')
 
     id = identify(infile)
+<<<<<<< HEAD
 
     if id.sensor not in ['S1A', 'S1B']:
+=======
+    
+    if id.sensor not in ['S1A', 'S1B', 'S1C', 'S1D']:
+>>>>>>> 1297ec2d3a4ff59dca6df0dfa4c64f1629ae8471
         raise RuntimeError('this function is for Sentinel-1 only')
 
     os.makedirs(outdir, exist_ok=True)

@@ -1,7 +1,7 @@
 ###############################################################################
 # general GAMMA utilities
 
-# Copyright (c) 2014-2021, the pyroSAR Developers, Stefan Engelhardt.
+# Copyright (c) 2014-2026, the pyroSAR Developers, Stefan Engelhardt.
 
 # This file is part of the pyroSAR Project. It is subject to the
 # license terms in the LICENSE.txt file found in the top-level
@@ -17,13 +17,35 @@ import re
 import string
 import codecs
 import subprocess as sp
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from pyroSAR.examine import ExamineGamma
 from spatialist.ancillary import parse_literal, run, union, dissolve
 from spatialist.envi import hdr
 
 from .error import gammaErrorHandler
+
+
+def do_execute(par, ids, exist_ok):
+    """
+    small helper function to assess whether a GAMMA command shall be executed.
+
+    Parameters
+    ----------
+    par: dict
+        a dictionary containing all arguments for the command
+    ids: list[str]
+        the IDs of the output files
+    exist_ok: bool
+        allow existing output files?
+
+    Returns
+    -------
+    bool
+        execute the command because (a) not all output files exist or (b) existing files are not allowed
+    """
+    all_exist = all([os.path.isfile(par[x]) for x in ids if par[x] != '-'])
+    return (exist_ok and not all_exist) or not exist_ok
 
 
 class ISPPar(object):
@@ -89,7 +111,7 @@ class ISPPar(object):
         elif 'DEM/MAP parameter file' in content[0]:
             setattr(self, 'filetype', 'dem')
         else:
-            setattr(self, 'filetype', 'unknown')
+            raise RuntimeError('unknown parameter file type')
         
         for line in content:
             match = ISPPar._re_kv_pair.match(line)
@@ -120,13 +142,14 @@ class ISPPar(object):
                             break
             self.keys.append(key)
             setattr(self, key, value)
-
+        
         if hasattr(self, 'date'):
-            try:
-                self.date = '{}-{:02d}-{:02d}T{:02d}:{:02d}:{:02f}'.format(*self.date)
-            except:
-                # if only date available
-                self.date = '{}-{:02d}-{:02d}'.format(*self.date)
+            # the date field is rounded to four digits, so only the day is extracted
+            # and then the start_time field is added to be more precise and to avoid
+            # rounding to 60 s.
+            self.date_dt = datetime(*self.date[:3])
+            self.date_dt += timedelta(seconds=self.start_time)
+            self.date = self.date_dt.strftime('%Y-%m-%dT%H:%M:%S.%f')
     
     def __enter__(self):
         return self
@@ -204,9 +227,133 @@ class ISPPar(object):
                                    str(abs(float(self.post_lon))),
                                    str(abs(float(self.post_lat))),
                                    'WGS-84', 'units=Degrees']
+            elif self.DEM_projection == 'PS':
+                if self.projection_name == 'WGS 84 / Antarctic Polar Stereographic':
+                    out['map_info'] = [
+                        'EPSG:3031 - WGS 84 / Antarctic Polar Stereographic',
+                        '1.0000',
+                        '1.0000',
+                        self.corner_east - (abs(self.post_east) / 2),
+                        self.corner_north + (abs(self.post_north) / 2),
+                        str(abs(float(self.post_east))),
+                        str(abs(float(self.post_north))),
+                        'WGS-84',
+                        'units=Meters',
+                    ]
+                elif self.projection_name == 'WGS 84 / Arctic Polar Stereographic':
+                    out['map_info'] = [
+                        'EPSG:3995 - WGS 84 / Arctic Polar Stereographic',
+                        '1.0000',
+                        '1.0000',
+                        self.corner_east - (abs(self.post_east) / 2),
+                        self.corner_north + (abs(self.post_north) / 2),
+                        str(abs(float(self.post_east))),
+                        str(abs(float(self.post_north))),
+                        'WGS-84',
+                        'units=Meters',
+                    ]
+                else:
+                    raise RuntimeError(
+                        f'unsupported projection: "{self.DEM_projection}; {self.projection_name}". The projection name "{self.projection_name}" was not recognised. Expected projection names are "WGS 84 / Arctic Polar Stereographic" and "WGS 84 / Antarctic Polar Stereographic". Add support for the required projection name as an ENVI map info output in gamma.auxil.ISPPar.envidict.'
+                    )
             else:
-                raise RuntimeError('unsupported projection: {}'.format(self.DEM_projection))
+                raise RuntimeError(
+                    f'unsupported projection: "{self.DEM_projection}; {self.projection_name}". To resolve, create an ENVI map info output for this projection in gamma.auxil.ISPPar.envidict.'
+                )
         return out
+
+
+class Namespace(object):
+    """
+    GAMMA file name handler. This improves managing the many files names
+    handled when processing with GAMMA.
+    
+    Parameters
+    ----------
+    directory: str
+        the directory path where files shall be written.
+    basename: str
+        the product basename as returned by
+        :meth:`pyroSAR.drivers.ID.outname_base`
+    
+    Examples
+    --------
+    >>> n = Namespace(directory='/path', basename='S1A__IW___A_20180829T170631')
+    >>> print(n.pix_geo)
+    '-'
+    >>> n.appreciate(['pix_geo'])
+    >>> print(n.pix_geo)
+    '/path/S1A__IW___A_20180829T170631_pix_geo'
+    """
+    
+    def __init__(self, directory, basename):
+        self.__base = basename
+        self.__outdir = directory
+        self.__reg = []
+    
+    def __getitem__(self, item):
+        item = str(item).replace('.', '_')
+        return self.get(item)
+    
+    def __getattr__(self, item):
+        # will only be run if object has no attribute item
+        return '-'
+    
+    def appreciate(self, keys):
+        """
+
+        Parameters
+        ----------
+        keys: list[str]
+
+        Returns
+        -------
+
+        """
+        for key in keys:
+            setattr(self, key.replace('.', '_'), os.path.join(self.__outdir, self.__base + '_' + key))
+            if key not in self.__reg:
+                self.__reg.append(key.replace('.', '_'))
+    
+    def depreciate(self, keys):
+        """
+
+        Parameters
+        ----------
+        keys: list[str]
+
+        Returns
+        -------
+
+        """
+        for key in keys:
+            setattr(self, key.replace('.', '_'), '-')
+            if key not in self.__reg:
+                self.__reg.append(key.replace('.', '_'))
+    
+    def getall(self):
+        out = {}
+        for key in self.__reg:
+            out[key] = getattr(self, key)
+        return out
+    
+    def select(self, selection):
+        return [getattr(self, key) for key in selection]
+    
+    def isregistered(self, key):
+        return key in self.__reg
+    
+    def isappreciated(self, key):
+        if self.isregistered(key):
+            if self.get(key) != '-':
+                return True
+        return False
+    
+    def isfile(self, key):
+        return hasattr(self, key) and os.path.isfile(getattr(self, key))
+    
+    def get(self, key):
+        return getattr(self, key)
 
 
 def par2hdr(parfile, hdrfile, modifications=None, nodata=None):
@@ -247,6 +394,154 @@ def par2hdr(parfile, hdrfile, modifications=None, nodata=None):
         hdr(items, hdrfile)
 
 
+def process(
+        cmd: list[str],
+        outdir: str | None = None,
+        logfile: str | None = None,
+        logpath: str | None = None,
+        inlist: list[str] | None = None,
+        void: bool = True,
+        shellscript: str | None = None
+) -> tuple[str, str] | None:
+    """
+    wrapper function to execute GAMMA commands via module :mod:`subprocess`
+
+    Parameters
+    ----------
+    cmd:
+        The command line arguments.
+    outdir:
+        The directory to execute the command in. This directory is also set
+        as environment variable in `shellscript`.
+    logfile:
+        A file to write the command log to. Overrides parameter `logpath`.
+    logpath:
+        A directory to write logfiles to. The file will be named
+        {GAMMA command}.log, e.g. gc_map.log.
+        Overrides parameter `logfile`.
+    inlist:
+        A list of values, which is passed as interactive inputs via `stdin`.
+    void:
+        Return the `stdout` and `stderr` messages?
+    shellscript:
+        A file to write the GAMMA commands to in shell format.
+
+    Returns
+    -------
+        the stdout and stderr messages if void is False, otherwise None
+    """
+    if logfile is not None:
+        log = logfile
+    else:
+        log = os.path.join(logpath, os.path.basename(cmd[0]) + '.log') if logpath else None
+    gamma_home = ExamineGamma().home
+    if shellscript is not None:
+        if not os.path.isfile(shellscript):
+            # create an empty file
+            with open(shellscript, 'w') as init:
+                pass
+        line = ' '.join([str(x) for x in dissolve(cmd)])
+        if inlist is not None:
+            line += ' <<< $"{}"'.format('\n'.join([str(x) for x in inlist]) + '\n')
+        with open(shellscript, 'r+') as sh:
+            content = sh.read()
+            sh.seek(0)
+            disclaimer = 'This script was created automatically by pyroSAR'
+            is_new = re.search(disclaimer, content) is None
+            if is_new:
+                ts = datetime.now().strftime('%a %b %d %H:%M:%S %Y')
+                sh.write(f'# {disclaimer} on {ts}\n\n')
+                sh.write('GAMMA_HOME={}\n\n'.format(gamma_home))
+                sh.write(content)
+            line = line.replace(gamma_home, '$GAMMA_HOME')
+            if outdir is not None:
+                line = line.replace(outdir, '$OUTDIR')
+                outdirs = re.findall('OUTDIR=(.*)\n', content)
+                if len(outdirs) == 0 or outdir != outdirs[-1]:
+                    line = f"OUTDIR={outdir}\n\n{line}"
+            sh.seek(0, 2)  # set pointer to the end of the file
+            sh.write(line + '\n\n')
+    
+    # create an environment containing the locations of all GAMMA submodules to be passed to the subprocess calls
+    gammaenv = os.environ.copy()
+    gammaenv['GAMMA_HOME'] = gamma_home
+    returncode, out, err = run([ExamineGamma().gdal_config, '--datadir'], void=False)
+    gammaenv['GDAL_DATA'] = out.strip()
+    for module in ['DIFF', 'DISP', 'IPTA', 'ISP', 'LAT']:
+        loc = os.path.join(gammaenv['GAMMA_HOME'], module)
+        if os.path.isdir(loc):
+            gammaenv[module + '_HOME'] = loc
+            for submodule in ['bin', 'scripts']:
+                subloc = os.path.join(loc, submodule)
+                if os.path.isdir(subloc):
+                    gammaenv['PATH'] += os.pathsep + subloc
+    
+    # execute the command
+    returncode, out, err = run(cmd, outdir=outdir, logfile=log, inlist=inlist,
+                               void=False, errorpass=True, env=gammaenv)
+    gammaErrorHandler(returncode, out, err)
+    if not void:
+        return out, err
+
+
+def slc_corners(parfile):
+    """
+    extract the corner coordinates of a SAR scene
+
+    Parameters
+    ----------
+    parfile: str
+        the GAMMA parameter file to read coordinates from
+
+    Returns
+    -------
+    dict of float
+        a dictionary with keys xmin, xmax, ymin, ymax
+    """
+    out, err = process(['SLC_corners', parfile], void=False)
+    pts = {}
+    pattern = r'-?[0-9]+\.[0-9]+'
+    for line in out.split('\n'):
+        if line.startswith('min. latitude'):
+            pts['ymin'], pts['ymax'] = [float(x) for x in
+                                        re.findall(pattern, line)]
+        elif line.startswith('min. longitude'):
+            pts['xmin'], pts['xmax'] = [float(x) for x in
+                                        re.findall(pattern, line)]
+    return pts
+
+
+class Spacing(object):
+    """
+    compute multilooking factors and pixel spacings from an ISPPar object for a defined ground range target pixel spacing
+
+    Parameters
+    ----------
+    par: str or ISPPar
+        the ISP parameter file
+    spacing: int or float
+        the target pixel spacing in ground range
+    """
+    
+    def __init__(self, par, spacing='automatic'):
+        # compute ground range pixel spacing
+        par = par if isinstance(par, ISPPar) else ISPPar(par)
+        self.groundRangePS = par.range_pixel_spacing / (math.sin(math.radians(par.incidence_angle)))
+        # compute initial multilooking factors
+        if spacing == 'automatic':
+            if self.groundRangePS > par.azimuth_pixel_spacing:
+                ratio = self.groundRangePS / par.azimuth_pixel_spacing
+                self.rlks = 1
+                self.azlks = int(round(ratio))
+            else:
+                ratio = par.azimuth_pixel_spacing / self.groundRangePS
+                self.rlks = int(round(ratio))
+                self.azlks = 1
+        else:
+            self.rlks = int(round(float(spacing) / self.groundRangePS))
+            self.azlks = int(round(float(spacing) / par.azimuth_pixel_spacing))
+
+
 class UTM(object):
     """
     convert a gamma parameter file corner coordinate from EQA to UTM
@@ -284,229 +579,3 @@ class UTM(object):
         except KeyError:
             self.zone, self.northing, self.easting = \
                 self.meta['UTM zone/northing/easting (m)']
-
-
-def process(cmd, outdir=None, logfile=None, logpath=None, inlist=None, void=True, shellscript=None):
-    """
-    wrapper function to execute GAMMA commands via module :mod:`subprocess`
-    
-    Parameters
-    ----------
-    cmd: list[str]
-        the command line arguments
-    outdir: str
-        the directory to execute the command in
-    logfile: str
-        a file to write the command log to; overrides parameter logpath
-    logpath: str
-        a directory to write logfiles to; the file will be named {GAMMA command}.log, e.g. gc_map.log;
-        is overridden by parameter logfile
-    inlist: list
-        a list of values, which is passed as interactive inputs via stdin
-    void: bool
-        return the stdout and stderr messages?
-    shellscript: str
-        a file to write the GAMMA commands to in shell format
-    
-    Returns
-    -------
-    tuple of str or None
-        the stdout and stderr messages if void is False, otherwise None
-    """
-    if logfile is not None:
-        log = logfile
-    else:
-        log = os.path.join(logpath, os.path.basename(cmd[0]) + '.log') if logpath else None
-    gamma_home = ExamineGamma().home
-    if shellscript is not None:
-        if not os.path.isfile(shellscript):
-            # create an empty file
-            with open(shellscript, 'w') as init:
-                pass
-        line = ' '.join([str(x) for x in dissolve(cmd)])
-        if inlist is not None:
-            line += ' <<< $"{}"'.format('\n'.join([str(x) for x in inlist]) + '\n')
-        with open(shellscript, 'r+') as sh:
-            if outdir is not None:
-                content = sh.read()
-                sh.seek(0)
-                is_new = re.search('this script was created automatically by pyroSAR', content) is None
-                if is_new:
-                    ts = datetime.now().strftime('%a %b %d %H:%M:%S %Y')
-                    sh.write('# this script was created automatically by pyroSAR on {}\n\n'.format(ts))
-                    sh.write('export base={}\n'.format(outdir))
-                    sh.write('export GAMMA_HOME={}\n\n'.format(gamma_home))
-                    sh.write(content)
-                line = line.replace(outdir, '$base').replace(gamma_home, '$GAMMA_HOME')
-            sh.seek(0, 2)  # set pointer to the end of the file
-            sh.write(line + '\n\n')
-    
-    # create an environment containing the locations of all GAMMA submodules to be passed to the subprocess calls
-    gammaenv = os.environ.copy()
-    gammaenv['GAMMA_HOME'] = gamma_home
-    out, err = run([ExamineGamma().gdal_config, '--datadir'], void=False)
-    gammaenv['GDAL_DATA'] = out.strip()
-    for module in ['DIFF', 'DISP', 'IPTA', 'ISP', 'LAT']:
-        loc = os.path.join(gammaenv['GAMMA_HOME'], module)
-        if os.path.isdir(loc):
-            gammaenv[module + '_HOME'] = loc
-            for submodule in ['bin', 'scripts']:
-                subloc = os.path.join(loc, submodule)
-                if os.path.isdir(subloc):
-                    gammaenv['PATH'] += os.pathsep + subloc
-    
-    # execute the command
-    out, err = run(cmd, outdir=outdir, logfile=log, inlist=inlist, void=False, errorpass=True, env=gammaenv)
-    gammaErrorHandler(out, err)
-    if not void:
-        return out, err
-
-
-class Spacing(object):
-    """
-    compute multilooking factors and pixel spacings from an ISPPar object for a defined ground range target pixel spacing
-    
-    Parameters
-    ----------
-    par: str or ISPPar
-        the ISP parameter file
-    spacing: int or float
-        the target pixel spacing in ground range
-    """
-    def __init__(self, par, spacing='automatic'):
-        # compute ground range pixel spacing
-        par = par if isinstance(par, ISPPar) else ISPPar(par)
-        self.groundRangePS = par.range_pixel_spacing / (math.sin(math.radians(par.incidence_angle)))
-        # compute initial multilooking factors
-        if spacing == 'automatic':
-            if self.groundRangePS > par.azimuth_pixel_spacing:
-                ratio = self.groundRangePS / par.azimuth_pixel_spacing
-                self.rlks = 1
-                self.azlks = int(round(ratio))
-            else:
-                ratio = par.azimuth_pixel_spacing / self.groundRangePS
-                self.rlks = int(round(ratio))
-                self.azlks = 1
-        else:
-            self.rlks = int(round(float(spacing) / self.groundRangePS))
-            self.azlks = int(round(float(spacing) / par.azimuth_pixel_spacing))
-
-
-class Namespace(object):
-    def __init__(self, directory, basename):
-        self.__base = basename
-        self.__outdir = directory
-        self.__reg = []
-    
-    def __getitem__(self, item):
-        item = str(item).replace('.', '_')
-        return self.get(item)
-    
-    def __getattr__(self, item):
-        # will only be run if object has no attribute item
-        return '-'
-    
-    def appreciate(self, keys):
-        """
-        
-        Parameters
-        ----------
-        keys: list[str]
-
-        Returns
-        -------
-
-        """
-        for key in keys:
-            setattr(self, key.replace('.', '_'), os.path.join(self.__outdir, self.__base + '_' + key))
-            if key not in self.__reg:
-                self.__reg.append(key.replace('.', '_'))
-    
-    def depreciate(self, keys):
-        """
-        
-        Parameters
-        ----------
-        keys: list[str]
-
-        Returns
-        -------
-
-        """
-        for key in keys:
-            setattr(self, key.replace('.', '_'), '-')
-            if key not in self.__reg:
-                self.__reg.append(key.replace('.', '_'))
-    
-    def getall(self):
-        out = {}
-        for key in self.__reg:
-            out[key] = getattr(self, key)
-        return out
-    
-    def select(self, selection):
-        return [getattr(self, key) for key in selection]
-    
-    def isregistered(self, key):
-        return key in self.__reg
-    
-    def isappreciated(self, key):
-        if self.isregistered(key):
-            if self.get(key) != '-':
-                return True
-        return False
-    
-    def isfile(self, key):
-        return hasattr(self, key) and os.path.isfile(getattr(self, key))
-    
-    def get(self, key):
-        return getattr(self, key)
-
-
-def slc_corners(parfile):
-    """
-    extract the corner coordinates of a SAR scene
-    
-    Parameters
-    ----------
-    parfile: str
-        the GAMMA parameter file to read coordinates from
-
-    Returns
-    -------
-    dict of float
-        a dictionary with keys xmin, xmax, ymin, ymax
-    """
-    out, err = process(['SLC_corners', parfile], void=False)
-    pts = {}
-    pattern = r'-?[0-9]+\.[0-9]+'
-    for line in out.split('\n'):
-        if line.startswith('min. latitude'):
-            pts['ymin'], pts['ymax'] = [float(x) for x in
-                                        re.findall(pattern, line)]
-        elif line.startswith('min. longitude'):
-            pts['xmin'], pts['xmax'] = [float(x) for x in
-                                        re.findall(pattern, line)]
-    return pts
-
-
-def do_execute(par, ids, exist_ok):
-    """
-    small helper function to assess whether a GAMMA command shall be executed.
-
-    Parameters
-    ----------
-    par: dict
-        a dictionary containing all arguments for the command
-    ids: list[str]
-        the IDs of the output files
-    exist_ok: bool
-        allow existing output files?
-
-    Returns
-    -------
-    bool
-        execute the command because (a) not all output files exist or (b) existing files are not allowed
-    """
-    all_exist = all([os.path.isfile(par[x]) for x in ids if par[x] != '-'])
-    return (exist_ok and not all_exist) or not exist_ok

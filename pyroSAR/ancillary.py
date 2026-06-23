@@ -1,7 +1,7 @@
 ###############################################################################
 # ancillary routines for software pyroSAR
 
-# Copyright (c) 2014-2024, the pyroSAR Developers.
+# Copyright (c) 2014-2026, the pyroSAR Developers.
 
 # This file is part of the pyroSAR Project. It is subject to the
 # license terms in the LICENSE.txt file found in the top-level
@@ -23,25 +23,37 @@ from math import sin, radians
 import inspect
 from datetime import datetime
 from . import patterns
-
 from spatialist.ancillary import finder
+from dataclasses import dataclass
+from typing import Optional, Literal, Callable, Any
+try:
+    from typing import Self
+except ImportError:
+    # Python < 3.11
+    from typing_extensions import Self
+from types import TracebackType
+import logging
+
+log = logging.getLogger(__name__)
 
 
-def groupby(images, attribute):
+def groupby(
+        images: list[str],
+        attribute: str
+) -> list[list[str]]:
     """
     group a list of images by a metadata attribute
     
     Parameters
     ----------
-    images: list[str]
+    images:
         the names of the images to be sorted
-    attribute: str
+    attribute:
         the name of the attribute used for sorting;
         see :func:`parse_datasetname` for options
     
     Returns
     -------
-    list[list[str]]
         a list of sub-lists containing the grouped images
     """
     images_sort = sorted(images, key=lambda x: re.search(patterns.pyrosar, x).group(attribute))
@@ -58,22 +70,25 @@ def groupby(images, attribute):
     return out
 
 
-def groupbyTime(images, function, time):
+def groupbyTime(
+        images: list[str],
+        function: Callable[[str], Any],
+        time: int | float
+) -> list[list[str]]:
     """
     function to group images by their acquisition time difference
 
     Parameters
     ----------
-    images: list[str]
+    images:
         a list of image names
-    function: function
+    function:
         a function to derive the time from the image names; see e.g. :func:`seconds`
-    time: int or float
+    time:
         a time difference in seconds by which to group the images
 
     Returns
     -------
-    list[list[str]]
         a list of sub-lists containing the grouped images
     """
     # sort images by time stamp
@@ -93,26 +108,37 @@ def groupbyTime(images, function, time):
     return [x[0] if len(x) == 1 else x for x in groups]
 
 
-def multilook_factors(source_rg, source_az, target, geometry, incidence):
+def multilook_factors(
+        source_rg: int | float,
+        source_az: int | float,
+        target: int | float,
+        geometry: Literal["SLANT_RANGE", "GROUND_RANGE"],
+        incidence: int | float
+) -> tuple[int, int]:
     """
-    compute multi-looking factors to approximate a square pixel with defined target ground range pixel spacing.
+    Compute multi-looking factors. A square pixel is approximated with
+    defined target ground range pixel spacing. The function computes a
+    cost for multilook factor combinations based on the difference between
+    the resulting spacing and the target spacing for range and azimuth
+    respectively and the difference between range and azimuth spacing.
+    Based on this cost, the optimal multilook factors are chosen.
+    Each of the three criteria is weighted equally.
     
     Parameters
     ----------
-    source_rg: int or float
+    source_rg:
         the range pixel spacing
-    source_az: int or float
+    source_az:
         the azimuth pixel spacing
-    target: int or float
+    target:
         the target pixel spacing of an approximately square pixel
-    geometry: str
+    geometry:
         the imaging geometry; either 'SLANT_RANGE' or 'GROUND_RANGE'
-    incidence: int or float
-        the angle of incidence
+    incidence:
+        the angle of incidence in degrees
 
     Returns
     -------
-    tuple[int]
         the multi-looking factors as (range looks, azimuth looks)
     
     Examples
@@ -123,20 +149,72 @@ def multilook_factors(source_rg, source_az, target, geometry, incidence):
     >>> print(rlks, azlks)
     4 1
     """
-    azlks = int(round(float(target) / source_az))
-    azlks = azlks if azlks > 0 else 1
-    if geometry == 'SLANT_RANGE':
-        rlks = float(azlks) * source_az * sin(radians(incidence)) / source_rg
-    elif geometry == 'GROUND_RANGE':
-        rlks = float(azlks) * source_az / source_rg
-    else:
-        raise ValueError("parameter 'geometry' must be either 'SLANT_RANGE' or 'GROUND_RANGE'")
     
-    rlks = int(round(rlks))
-    return rlks, azlks
+    @dataclass
+    class MultilookResult:
+        rglks: int
+        azlks: int
+        cost: float
+    
+    sp_az = source_az
+    if geometry == 'SLANT_RANGE':
+        sp_rg = source_rg / sin(radians(incidence))
+    elif geometry == 'GROUND_RANGE':
+        sp_rg = source_rg
+    else:
+        raise ValueError("parameter 'geometry' must be either "
+                         "'SLANT_RANGE' or 'GROUND_RANGE'")
+    sp_target = max(sp_az, sp_rg, target)
+    
+    # determine initial ML factors
+    rglks_init = int(round(sp_target / sp_rg))
+    azlks_init = int(round(sp_target / sp_az))
+    
+    best: Optional[MultilookResult] = None
+    
+    # weights for the distance criteria
+    w_rg = 1.
+    w_az = 1.
+    w_sq = 1.
+    
+    # iterate over some range of ML factors to find the best
+    # combination.
+    for rglks in range(1, rglks_init + 6):
+        sp_rg_out = sp_rg * rglks
+        
+        for azlks in range(1, azlks_init + 6):
+            sp_az_out = sp_az * azlks
+            
+            # compute distances and cost
+            d_rg = abs(sp_rg_out - sp_target)
+            d_az = abs(sp_az_out - sp_target)
+            d_sq = abs(sp_rg_out - sp_az_out)
+            
+            cost = w_rg * d_rg + w_az * d_az + w_sq * d_sq
+            
+            candidate = MultilookResult(
+                rglks=rglks,
+                azlks=azlks,
+                cost=cost,
+            )
+            if best is None:
+                best = candidate
+            else:
+                # primary: minimize cost
+                if candidate.cost < best.cost:
+                    best = candidate
+                # secondary: minimize rglks+azlks
+                elif candidate.cost == best.cost:
+                    if (candidate.rglks + candidate.azlks) < (best.rglks + best.azlks):
+                        best = candidate
+    rglks = best.rglks
+    azlks = best.azlks
+    
+    log.debug(f'ground range spacing: ({sp_rg * rglks}, {sp_az * azlks})')
+    return rglks, azlks
 
 
-def seconds(filename):
+def seconds(filename: str) -> float:
     """
     function to extract time in seconds from a file name.
     the format must follow a fixed pattern: YYYYmmddTHHMMSS
@@ -144,12 +222,11 @@ def seconds(filename):
 
     Parameters
     ----------
-    filename: str
+    filename:
         the name of a file from which to extract the time from
 
     Returns
     -------
-    float
         the difference between the time stamp in filename and Jan 01 1900 in seconds
     """
     # return mktime(strptime(re.findall('[0-9T]{15}', filename)[0], '%Y%m%dT%H%M%S'))
@@ -157,21 +234,25 @@ def seconds(filename):
     return td.total_seconds()
 
 
-def parse_datasetname(name, parse_date=False):
+def parse_datasetname(
+        name: str,
+        parse_date: bool = False
+) -> dict[str, str | None | list[str] | datetime] | None:
     """
-    Parse the name of a pyroSAR processing product and extract its metadata components as dictionary
+    Parse the name of a pyroSAR processing product
     
     Parameters
     ----------
-    name: str
+    name:
         the name of the file to be parsed
-    parse_date: bool
-        parse the start date to a :class:`~datetime.datetime` object or just return the string?
+    parse_date:
+        parse the start date to a :class:`~datetime.datetime`
+        object or just return the string?
     
     Returns
     -------
-    dict
-        the metadata attributes
+        the metadata attributes parsed from the file name or
+        None if the file name does not match the pattern.
     
     Examples
     --------
@@ -198,15 +279,19 @@ def parse_datasetname(name, parse_date=False):
     return out
 
 
-def find_datasets(directory, recursive=False, **kwargs):
+def find_datasets(
+        directory: str,
+        recursive: bool = False,
+        **kwargs
+) -> list[str]:
     """
     find pyroSAR datasets in a directory based on their metadata
     
     Parameters
     ----------
-    directory: str
+    directory:
         the name of the directory to be searched
-    recursive: bool
+    recursive:
         search the directory recursively into subdirectories?
     kwargs:
         Metadata attributes for filtering the scene list supplied as `key=value`. e.g. `sensor='S1A'`.
@@ -218,7 +303,6 @@ def find_datasets(directory, recursive=False, **kwargs):
     
     Returns
     -------
-    list of str
         the file names found in the directory and filtered by metadata attributes
     
     Examples
@@ -245,54 +329,56 @@ def find_datasets(directory, recursive=False, **kwargs):
     return selection
 
 
-def getargs(func):
+def getargs(func: Callable[..., Any]) -> list[str]:
     """
     get the arguments of a function
     
     Parameters
     ----------
-    func: function
+    func:
         the function to be checked
 
     Returns
     -------
-    list or str
         the argument names
     """
     return sorted(inspect.getfullargspec(func).args)
 
 
-def hasarg(func, arg):
+def hasarg(func: Callable[..., Any], arg: str) -> bool:
     """
     simple check whether a function takes a parameter as input
     
     Parameters
     ----------
-    func: function
+    func:
         the function to be checked
-    arg: str
+    arg:
         the argument name to be found
 
     Returns
     -------
-    bool
         does the function take this as argument?
     """
     return arg in getargs(func)
 
 
-def windows_fileprefix(func, path, exc_info):
+def windows_fileprefix(
+        func: Callable[[str], object],
+        path: str,
+        exc_info: tuple[type[BaseException], BaseException, TracebackType | None],
+) -> None:
     """
     Helper function for :func:`shutil.rmtree` to exceed Windows' file name length limit of 256 characters.
     See `here <https://stackoverflow.com/questions/36219317/pathname-too-long-to-open>`_ for details.
 
     Parameters
     ----------
-    func: function
+    func:
         the function to be executed, i.e. :func:`shutil.rmtree`
-    path: str
+    path:
         the path to be deleted
-    exc_info: tuple
+    exc_info:
         execution info as returned by :func:`sys.exc_info`
 
     Returns
@@ -333,6 +419,10 @@ class Lock(object):
     lock may be acquired whilst usage locks exist. On error usage locks are simply
     deleted.
     
+    The class supports nested locks. One function might lock a file, and another
+    function called in the same process will reuse this lock if it tries to lock
+    the file.
+    
     It may happen that lock files remain when a process is killed by HPC schedulers
     like Slurm because in this case the process is not ended by Python. Optimally,
     hard locks should be renamed to error lock files and usage lock files should be
@@ -345,79 +435,124 @@ class Lock(object):
     >>> with Lock(target=target):
     >>>     with open(target, 'w') as f:
     >>>         f.write('Hello World!')
+    
+    >>> with Lock(target=target):  # initialize lock
+    >>>     with Lock(target=target):  # reuse lock
+    >>>         with open(target, 'w') as f:
+    >>>             f.write('Hello World!')
 
     Parameters
     ----------
-    target: str
+    target:
         the file/folder to lock
-    soft: bool
+    soft:
         lock the file/folder only for reading (and not for modification)?
-    timeout: int
+    timeout:
         the time in seconds to retry acquiring a lock
     """
-    def __init__(self, target, soft=False, timeout=7200):
-        if os.path.isdir(target) and not os.path.exists(target):
-            raise OSError('target does not exist: {}'.format(target))
-        self.target = target
-        used_id = str(uuid.uuid4())
-        self.lock = self.target + '.lock'
-        self.error = self.target + '.error'
-        self.used = self.target + f'.used_{used_id}'
-        self.soft = soft
-        if os.path.isfile(self.error):
-            msg = 'cannot acquire lock on damaged target: {}'
-            raise RuntimeError(msg.format(self.target))
-        end = time.time() + timeout
-        while True:
-            if time.time() > end:
-                msg = 'could not acquire lock due to timeout: {}'
-                raise RuntimeError(msg.format(self.target))
-            try:
-                if self.soft and not os.path.isfile(self.lock):
-                    Path(self.used).touch(exist_ok=False)
-                    break
-                if not self.soft and not self.is_used():
-                    Path(self.lock).touch(exist_ok=False)
-                    break
-            except FileExistsError:
-                pass
-            time.sleep(1)
+    _instances = {}
+    _nesting_levels = {}
     
-    def __enter__(self):
+    def __new__(
+            cls,
+            target: str,
+            soft: bool = False,
+            timeout: int = 7200
+    ) -> Self:
+        target_abs = os.path.abspath(os.path.expanduser(target))
+        if target_abs not in cls._instances:
+            log.debug(f'creating lock instance for target {target_abs}')
+            instance = super().__new__(cls)
+            cls._instances[target_abs] = instance
+            cls._nesting_levels[target_abs] = 0
+        else:
+            if soft != cls._instances[target_abs].soft:
+                msg = 'cannot place nested {}-lock on existing {}-lock for target {}'
+                vals = ['read', 'write'] if soft else ['write', 'read']
+                vals.append(target_abs)
+                raise RuntimeError(msg.format(*vals))
+            log.debug(f'reusing lock instance for target {target_abs}')
+        return cls._instances[target_abs]
+    
+    def __init__(
+            self,
+            target: str,
+            soft: bool = False,
+            timeout: int = 7200
+    ) -> None:
+        if not hasattr(self, '_initialized'):
+            self.target = os.path.abspath(os.path.expanduser(target))
+            used_id = str(uuid.uuid4())
+            self.lock = self.target + '.lock'
+            self.error = self.target + '.error'
+            self.used = self.target + f'.used_{used_id}'
+            self.soft = soft
+            if os.path.isfile(self.error):
+                msg = 'cannot acquire lock on damaged target: {}'
+                raise RuntimeError(msg.format(self.target))
+            end = time.time() + timeout
+            log.debug(f'trying to {"read" if self.soft else "write"}-lock {target}')
+            while True:
+                if time.time() > end:
+                    msg = 'could not acquire lock due to timeout: {}'
+                    raise RuntimeError(msg.format(self.target))
+                try:
+                    if self.soft and not os.path.isfile(self.lock):
+                        Path(self.used).touch(exist_ok=False)
+                        break
+                    if not self.soft and not self.is_used():
+                        Path(self.lock).touch(exist_ok=False)
+                        break
+                except FileExistsError:
+                    pass
+                time.sleep(1)
+            log.debug(f'acquired {"read" if self.soft else "write"}-lock on {target}')
+            self._initialized = True
+        Lock._nesting_levels[self.target] += 1
+    
+    def __enter__(self) -> Self:
         return self
     
-    def __exit__(self, exc_type, exc_value, traceback):
-        if not self.soft and exc_type is not None:
-            if os.path.exists(self.target):
-                os.rename(self.lock, self.error)
-        else:
-            self.remove()
+    def __exit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc_value: BaseException | None,
+            traceback: TracebackType | None,
+    ) -> None:
+        self.remove(exc_type)
     
-    def is_used(self):
+    def is_used(self) -> bool:
         """
         Does any usage lock exist?
-        
-        Returns
-        -------
-        bool
         """
         base = os.path.basename(self.target)
         folder = os.path.dirname(self.target)
         files = list(Path(folder).glob(base + '.used*'))
         return len(files) > 0
     
-    def remove(self):
+    def remove(
+            self,
+            exc_type: type[BaseException] | None = None
+    ) -> None:
         """
-        Remove the acquired soft/hard lock
-        
-        Returns
-        -------
-
+        Remove the acquired soft/hard lock or rename it to an error lock.
         """
-        if self.soft:
-            os.remove(self.used)
+        Lock._nesting_levels[self.target] -= 1
+        if Lock._nesting_levels[self.target] == 0:
+            if not self.soft and exc_type is not None and os.path.exists(self.target):
+                os.rename(self.lock, self.error)
+                log.debug(f'placed error-lock on {self.target}')
+            else:
+                if self.soft:
+                    os.remove(self.used)
+                else:
+                    os.remove(self.lock)
+                msg_sub = "read" if self.soft else "write"
+                log.debug(f'removed {msg_sub}-lock on {self.target}')
+            del Lock._instances[self.target]
+            del Lock._nesting_levels[self.target]
         else:
-            os.remove(self.lock)
+            log.debug(f'decrementing lock level on {self.target}')
 
 
 class LockCollection(object):
@@ -426,19 +561,30 @@ class LockCollection(object):
 
     Parameters
     ----------
-    targets: list[str]
+    targets:
         the files/folders to lock
-    soft: bool
+    soft:
         lock the files/folders only for reading (and not for modification)?
-    timeout: int
+    timeout:
         the time in seconds to retry acquiring a lock
     """
-    def __init__(self, targets, soft=False, timeout=7200):
+    
+    def __init__(
+            self,
+            targets: list[str],
+            soft: bool = False,
+            timeout: int = 7200
+    ):
         self.locks = [Lock(x, soft=soft, timeout=timeout) for x in targets]
     
-    def __enter__(self):
+    def __enter__(self) -> Self:
         return self
     
-    def __exit__(self, exc_type, exc_value, traceback):
-        for lock in self.locks:
-            lock.remove()
+    def __exit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc_value: BaseException | None,
+            traceback: TracebackType | None,
+    ) -> None:
+        for lock in reversed(self.locks):
+            lock.__exit__(exc_type, exc_value, traceback)

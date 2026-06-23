@@ -1,21 +1,22 @@
 name: ps_test
 channels:
   - conda-forge
-  - defaults
 dependencies:
-  - python>=3.8,<3.11  # https://github.com/kvesteri/sqlalchemy-utils/issues/716
+  - gdal>=2.4
+  - geoalchemy2>=0.14.0
+  - libgdal
+  - libspatialite>=5.1.0
+  - lxml
+  - numpy
+  - packaging
+  - pillow
   - progressbar2
-  - numpy<2.0
-  - spatialist>=0.12.1
+  - psutil
+  - psycopg2
+  - python>=3.11
   - pyyaml
   - requests
-  - psycopg2
-  - sqlalchemy>=1.4,<2.0
-  - sqlalchemy-utils>=0.37
-  - geoalchemy2<0.14.0
-  - gdal>=2.4
-  - libgdal
-  - pillow
-  - lxml
-  - packaging
-  - libspatialite>=5.1.0
+  - shapely
+  - spatialist>=0.17.0
+  - sqlalchemy>=1.4
+  - sqlalchemy-utils>=0.37,<0.42 # 0.42 drop database issue https://github.com/kvesteri/sqlalchemy-utils/issues/791

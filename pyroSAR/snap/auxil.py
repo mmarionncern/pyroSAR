@@ -1,7 +1,7 @@
 ###############################################################################
 # pyroSAR SNAP API tools
 
-# Copyright (c) 2017-2024, the pyroSAR Developers.
+# Copyright (c) 2017-2025, the pyroSAR Developers.
 
 # This file is part of the pyroSAR Project. It is subject to the
 # license terms in the LICENSE.txt file found in the top-level
@@ -22,7 +22,7 @@ import xml.etree.ElementTree as ET
 
 from pyroSAR import identify
 from pyroSAR.examine import ExamineSnap
-from pyroSAR.ancillary import windows_fileprefix, multilook_factors
+from pyroSAR.ancillary import windows_fileprefix, multilook_factors, Lock
 from pyroSAR.auxdata import get_egm_lookup
 
 from spatialist import Vector, Raster, vectorize, rasterize, boundary, intersect, bbox
@@ -75,7 +75,7 @@ def parse_node(name, use_existing=True):
     name: str
         the name of the processing node, e.g. Terrain-Correction
     use_existing: bool
-        use an existing XML text file or force re-parsing the gpt docstring and overwriting the XML file?
+        use an existing XML text file or force reparsing the gpt docstring and overwriting the XML file?
 
     Returns
     -------
@@ -89,7 +89,7 @@ def parse_node(name, use_existing=True):
     {'selectedPolarisations': None, 'removeThermalNoise': 'true', 'reIntroduceThermalNoise': 'false'}
     """
     snap = ExamineSnap()
-    version = snap.get_version('microwavetbx')['version']
+    version = snap.get_version('microwavetbx')
     name = name if name.endswith('.xml') else name + '.xml'
     operator = os.path.splitext(name)[0]
     nodepath = os.path.join(os.path.expanduser('~'), '.pyrosar', 'snap', 'nodes')
@@ -102,82 +102,92 @@ def parse_node(name, use_existing=True):
     for item in deprecated:
         os.remove(item)
     
-    if not os.path.isfile(absname) or not use_existing:
-        gpt = snap.gpt
-        
-        cmd = [gpt, operator, '-h']
-        
-        out, err = run(cmd=cmd, void=False)
-        
-        if re.search('Unknown operator', out + err):
-            raise RuntimeError("unknown operator '{}'".format(operator))
-        
-        graph = re.search('<graph id.*', out, flags=re.DOTALL).group()
-        graph = re.sub(r'>\${.*', '/>', graph)  # remove placeholder values like ${value}
-        graph = re.sub(r'<\.\.\./>.*', '', graph)  # remove <.../> placeholders
-        if operator == 'BandMaths':
-            graph = graph.replace('sourceProducts', 'sourceProduct')
-        tree = ET.fromstring(graph)
-        for elt in tree.iter():
-            if elt.text in ['string', 'double', 'integer', 'float']:
-                elt.text = None
-        node = tree.find('node')
-        node.attrib['id'] = operator
-        # add a second source product entry for multi-source nodes
-        # multi-source nodes are those with an entry 'sourceProducts' instead of 'sourceProduct'
-        # exceptions are registered in this list:
-        multisource = ['Back-Geocoding']
-        if operator != 'Read' and operator != 'ProductSet-Reader':
-            source = node.find('.//sources')
-            child = source[0]
-            if child.tag == 'sourceProducts' or operator in multisource:
-                child2 = ET.SubElement(source, 'sourceProduct.1', {'refid': 'Read (2)'})
-            child.tag = 'sourceProduct'
-            child.attrib['refid'] = 'Read'
-            child.text = None
-        if operator == 'BandMaths':
-            tband = tree.find('.//targetBand')
-            for item in ['spectralWavelength', 'spectralBandwidth',
-                         'scalingOffset', 'scalingFactor',
-                         'validExpression', 'spectralBandIndex']:
-                el = tband.find('.//{}'.format(item))
-                tband.remove(el)
-            for item in ['targetBands', 'variables']:
-                elem = tree.find(f'.//{item}')
-                pl = elem.find('.//_.002e..')
-                elem.remove(pl)
-        tree.find('.//parameters').set('class', 'com.bc.ceres.binding.dom.XppDomElement')
-        node = Node(node)
-        
-        # read the default values from the parameter documentation
-        parameters = node.parameters.keys()
-        out += '-P'
-        for parameter in parameters:
-            p1 = r'-P{}.*?-P'.format(parameter)
-            p2 = r"Default\ value\ is '([a-zA-Z0-9 ._\(\)]+)'"
-            r1 = re.search(p1, out, re.S)
-            if r1:
-                sub = r1.group()
-                r2 = re.search(p2, sub)
-                if r2:
-                    value = r2.groups()[0]
-                    node.parameters[parameter] = value
-                    continue
-            node.parameters[parameter] = None
-        
-        # fill in some additional defaults
-        if operator == 'BandMerge':
-            node.parameters['geographicError'] = '1.0E-5'
-        
-        with open(absname, 'w') as xml:
-            xml.write(str(node))
-        
-        return node
-    
-    else:
-        with open(absname, 'r') as workflow:
-            element = ET.fromstring(workflow.read())
-        return Node(element)
+    with Lock(absname):
+        if not os.path.isfile(absname) or not use_existing:
+            gpt = snap.gpt
+            
+            cmd = [gpt, operator, '-h']
+            
+            returncode, out, err = run(cmd=cmd, void=False)
+            
+            if re.search('Unknown operator', out + err):
+                raise RuntimeError("unknown operator '{}'".format(operator))
+            
+            graph = re.search('<graph id.*', out, flags=re.DOTALL).group()
+            # remove placeholder values like ${value}
+            graph = re.sub(r'>\${.*', '/>', graph)
+            # remove <.../> placeholders
+            graph = re.sub(r'<\.\.\./>.*', '', graph)
+            if operator == 'BandMaths':
+                graph = graph.replace('sourceProducts', 'sourceProduct')
+            tree = ET.fromstring(graph)
+            for elt in tree.iter():
+                if elt.text in ['string', 'double', 'integer', 'float']:
+                    elt.text = None
+            node = tree.find('node')
+            node.attrib['id'] = operator
+            # add a second source product entry for multi-source nodes
+            # multi-source nodes are those with an entry 'sourceProducts'
+            # instead of 'sourceProduct'
+            # exceptions are registered in this list:
+            multisource = ['Back-Geocoding']
+            if operator != 'Read' and operator != 'ProductSet-Reader':
+                source = node.find('.//sources')
+                child = source[0]
+                if child.tag == 'sourceProducts' or operator in multisource:
+                    child2 = ET.SubElement(source,
+                                           'sourceProduct.1',
+                                           {'refid': 'Read (2)'})
+                child.tag = 'sourceProduct'
+                child.attrib['refid'] = 'Read'
+                child.text = None
+            
+            # cleanup the BandMaths node
+            if operator == 'BandMaths':
+                tband = tree.find('.//targetBand')
+                allowed = ['name', 'type', 'expression',
+                           'description', 'unit', 'noDataValue']
+                invalid = [x.tag for x in tband if x.tag not in allowed]
+                for tag in invalid:
+                    el = tband.find(f'.//{tag}')
+                    tband.remove(el)
+                for item in ['targetBands', 'variables']:
+                    elem = tree.find(f'.//{item}')
+                    pl = elem.find('.//_.002e..')
+                    elem.remove(pl)
+            
+            # add a class parameter and create the Node object
+            value = 'com.bc.ceres.binding.dom.XppDomElement'
+            tree.find('.//parameters').set('class', value)
+            node = Node(node)
+            
+            # read the default values from the parameter documentation
+            parameters = node.parameters.keys()
+            out += '-P'
+            for parameter in parameters:
+                p1 = r'-P{}.*?-P'.format(parameter)
+                p2 = r"Default\ value\ is '([a-zA-Z0-9 ._\(\)]+)'"
+                r1 = re.search(p1, out, re.S)
+                if r1:
+                    sub = r1.group()
+                    r2 = re.search(p2, sub)
+                    if r2:
+                        value = r2.groups()[0]
+                        node.parameters[parameter] = value
+                        continue
+                node.parameters[parameter] = None
+            
+            # fill in some additional defaults
+            if operator == 'BandMerge':
+                node.parameters['geographicError'] = '1.0E-5'
+            
+            with open(absname, 'w') as xml:
+                xml.write(str(node))
+            return node
+        else:
+            with open(absname, 'r') as workflow:
+                element = ET.fromstring(workflow.read())
+            return Node(element)
 
 
 def execute(xmlfile, cleanup=True, gpt_exceptions=None, gpt_args=None):
@@ -510,10 +520,12 @@ def writer(xmlfile, outdir, basename_extensions=None,
                     base = re.sub('gammaSigmaRatio_[HV]{2}', 'gammaSigmaRatio', base)
                 if re.search('NE[BGS]Z', base):
                     base = re.sub('(NE[BGS]Z)_([HV]{2})', r'\g<2>_\g<1>', base)
+                if re.search('layover_shadow_mask', base):
+                    base = re.sub('layover_shadow_mask_[HV]{2}', 'layoverShadowMask', base)
                 name_new = outname_base.replace(suffix, '{0}.tif'.format(base))
             if re.search('elevation', basename):
                 nodata = dem_nodata
-            elif re.search('layoverShadowMask', basename):
+            elif re.search('layoverShadowMask|layover_shadow_mask', basename):
                 nodata = 255
             else:
                 nodata = 0
@@ -529,7 +541,7 @@ def writer(xmlfile, outdir, basename_extensions=None,
         infile = reader.parameters['file']
         try:
             id = identify(infile)
-            if id.sensor in ['S1A', 'S1B']:
+            if id.sensor in ['S1A', 'S1B', 'S1C', 'S1D']:
                 manifest = id.getFileObj(id.findfiles('manifest.safe')[0])
                 basename = id.outname_base(basename_extensions)
                 basename = '{0}_manifest.safe'.format(basename)
@@ -711,22 +723,25 @@ def groupbyWorkers(xmlfile, n=2):
     selects_id = [x.id for x in workflow['operator=BandSelect']]
     workers_groups = [workers_id[i:i + n] for i in range(0, len(workers_id), n)]
     
-    # in S1TBX 8.0.6 problems were found when executing ThermalNoiseRemoval by itself (after e.g. Calibration).
-    # When executed together with other nodes this worked so the node is re-grouped into the group of the source node.
-    i = 0
-    while i < len(workers_groups):
-        if workers_groups[i][0].startswith('ThermalNoiseRemoval'):
-            # get the group ID of the source node
-            source = workflow[workers_groups[i][0]].source
-            source_group_id = [source in x for x in workers_groups].index(True)
-            # move the node to the source group
-            workers_groups[source_group_id].append(workers_groups[i][0])
-            del workers_groups[i][0]
-        # delete the group if it is empty
-        if len(workers_groups[i]) == 0:
-            del workers_groups[i]
-        else:
-            i += 1
+    # some nodes must be executed together with a preceding node. They are moved to the previous group.
+    def move_group(operator):
+        i = 0
+        while i < len(workers_groups):
+            if workers_groups[i][0].startswith(operator):
+                # get the group ID of the source node
+                source = workflow[workers_groups[i][0]].source
+                source_group_id = [source in x for x in workers_groups].index(True)
+                # move the node to the source group
+                workers_groups[source_group_id].append(workers_groups[i][0])
+                del workers_groups[i][0]
+            # delete the group if it is empty
+            if len(workers_groups[i]) == 0:
+                del workers_groups[i]
+            else:
+                i += 1
+    
+    for operator in ['ThermalNoiseRemoval', 'Warp']:
+        move_group(operator)
     
     # append the BandSelect nodes to the group of their source nodes
     for item in selects_id:
@@ -1564,7 +1579,14 @@ def erode_edges(src, only_boundary=False, connectedness=4, pixels=1):
         if len(mask[mask == 0]) == 0:
             break
 
-        ras = gdal.Open(img, GA_Update)
+
+        # ras = gdal.Open(img, GA_Update)
+        # ensure usage of ENVI driver for .img files
+        ras = gdal.OpenEx(
+            img,
+            gdal.OF_RASTER | gdal.OF_UPDATE,
+            allowed_drivers=["ENVI"]
+        )
         band = ras.GetRasterBand(1)
         band.WriteArray(array)
         band.FlushCache()
@@ -1664,11 +1686,26 @@ def orb_parametrize(scene, formatName, allow_RES_OSV=True, url_option=1, **kwarg
         the Apply-Orbit-File node object
     """
 
-    orbit_lookup = {'ENVISAT': 'PRARE Precise (ERS1&2) (Auto Download)',
-                    'SENTINEL-1': 'Sentinel Precise (Auto Download)'}
-    orbitType = orbit_lookup[formatName]
-    if formatName == 'ENVISAT' and scene.sensor == 'ASAR':
-        orbitType = 'DORIS Precise VOR (ENVISAT) (Auto Download)'
+    # orbit_lookup = {'ENVISAT': 'PRARE Precise (ERS1&2) (Auto Download)',
+    #                 'SENTINEL-1': 'Sentinel Precise (Auto Download)'}
+    # orbitType = orbit_lookup[formatName]
+    # if formatName == 'ENVISAT' and scene.sensor == 'ASAR':
+    #     orbitType = 'DORIS Precise VOR (ENVISAT) (Auto Download)'
+
+    orbitType = None
+    orbit_lookup = {'SENTINEL-1': 'Sentinel Precise (Auto Download)'}
+    if formatName in orbit_lookup:
+        orbitType = orbit_lookup[formatName]
+    if formatName == 'ENVISAT':  # ASAR, ERS1, ERS2
+        if scene.sensor == 'ASAR':
+            orbitType = 'DORIS Precise VOR (ENVISAT) (Auto Download)'
+        else:
+            # Another option for ERS is 'DELFT Precise (ENVISAT, ERS1&2) (Auto Download)'.
+            # Neither option is suitable for all products, and auto-selection can
+            # only happen once a downloader (similar to S1.auxil.OSV) is written.
+            orbitType = 'PRARE Precise (ERS1&2) (Auto Download)'
+    if orbitType is None:
+        raise RuntimeError(f'Could not determine orbit type for {formatName} format')
 
     if formatName == 'SENTINEL-1':
         osv_type = ['POE', 'RES'] if allow_RES_OSV else 'POE'
@@ -1788,9 +1825,9 @@ def geo_parametrize(spacing, t_srs, tc_method='Range-Doppler',
         
          - Range-Doppler (SNAP node `Terrain-Correction`)
          - SAR simulation cross correlation
-           (SNAP nodes `SAR-Simulation`->`Cross-Correlation`->`SARSim-Terrain-Correction`)
+           (SNAP nodes `SAR-Simulation`->`Cross-Correlation`->`Warp`->`Terrain-Correction`)
     
-    sourceBands: list[str] or None
+    sourceBands: List[str] or None
         the image band names to geocode; default None: geocode all incoming bands.
     spacing: int or float
         The target pixel spacing in meters.
@@ -1833,7 +1870,7 @@ def geo_parametrize(spacing, t_srs, tc_method='Range-Doppler',
         
          - DEM
          - latLon
-         - incidenceAngleFromEllipsoid (Range-Doppler only)
+         - incidenceAngleFromEllipsoid
          - layoverShadowMask
          - localIncidenceAngle
          - projectedLocalIncidenceAngle
@@ -1863,21 +1900,27 @@ def geo_parametrize(spacing, t_srs, tc_method='Range-Doppler',
         the Terrain-Correction node object or a list containing the objects for SAR-Simulation,
         Cross-Correlation and SARSim-Terrain-Correction.
     """
+    tc = parse_node('Terrain-Correction')
+    tc.parameters['nodataValueAtSea'] = nodataValueAtSea
+    
     if tc_method == 'Range-Doppler':
-        tc = parse_node('Terrain-Correction')
         tc.parameters['sourceBands'] = sourceBands
-        tc.parameters['nodataValueAtSea'] = nodataValueAtSea
         sarsim = None
-        dem_node = out = tc
+        out = tc
+        dem_nodes = [tc]
     elif tc_method == 'SAR simulation cross correlation':
         sarsim = parse_node('SAR-Simulation')
         sarsim.parameters['sourceBands'] = sourceBands
         cc = parse_node('Cross-Correlation')
-        tc = parse_node('SARSim-Terrain-Correction')
-        dem_node = sarsim
-        out = [sarsim, cc, tc]
+        cc.parameters['coarseRegistrationWindowWidth'] = 64
+        cc.parameters['coarseRegistrationWindowHeight'] = 64
+        cc.parameters['maxIteration'] = 2
+        cc.parameters['onlyGCPsOnLand'] = True
+        warp = parse_node('Warp')
+        dem_nodes = [sarsim, tc]
+        out = [sarsim, cc, warp, tc]
     else:
-        raise RuntimeError('tc_method not recognized')
+        raise RuntimeError(f'tc_method not recognized: "{tc_method}"')
     
     tc.parameters['imgResamplingMethod'] = imgResamplingMethod
     
@@ -1928,17 +1971,14 @@ def geo_parametrize(spacing, t_srs, tc_method='Range-Doppler',
         for item in export_extra:
             if item in export_extra_options:
                 key = f'save{item[0].upper()}{item[1:]}'
-                if tc.operator == 'SARSim-Terrain-Correction':
-                    if item == 'layoverShadowMask':
-                        sarsim.parameters[key] = True
-                else:
-                    tc.parameters[key] = True
+                tc.parameters[key] = True
     
-    dem_parametrize(node=dem_node, demName=demName,
-                    externalDEMFile=externalDEMFile,
-                    externalDEMNoDataValue=externalDEMNoDataValue,
-                    externalDEMApplyEGM=externalDEMApplyEGM,
-                    demResamplingMethod=demResamplingMethod)
+    for dem_node in dem_nodes:
+        dem_parametrize(node=dem_node, demName=demName,
+                        externalDEMFile=externalDEMFile,
+                        externalDEMNoDataValue=externalDEMNoDataValue,
+                        externalDEMApplyEGM=externalDEMApplyEGM,
+                        demResamplingMethod=demResamplingMethod)
     
     for key, val in kwargs.items():
         tc.parameters[key] = val

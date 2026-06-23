@@ -1,0 +1,142 @@
+name: conda build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+    types: [ opened, reopened, synchronize ]
+  workflow_dispatch:
+    inputs:
+      debug_enabled:
+        type: boolean
+        description: 'Run the build with tmate debugging enabled (https://github.com/marketplace/actions/debugging-with-tmate)'
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  SNAP_VERSION: "13.0"
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: micromamba-shell {0}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up python environment
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: environment-dev.yml
+          cache-environment: true
+          init-shell: bash
+          generate-run-shell: true
+          post-cleanup: 'all'
+      - name: Install ESA SNAP
+        run: |
+          wget -nv https://download.esa.int/step/snap/$SNAP_VERSION/installers/esa-snap_all_linux-$SNAP_VERSION.0.sh
+          bash esa-snap_all_linux-$SNAP_VERSION.0.sh -q -dir $GITHUB_ACTION_PATH/esa-snap
+      - name: Set paths and variables
+        run: |
+          echo "$CONDA/bin" >> $GITHUB_PATH
+          echo "$GITHUB_ACTION_PATH/esa-snap/bin" >> $GITHUB_PATH
+          echo "PROJ_DATA=$CONDA/share/proj" >> $GITHUB_ENV
+      - name: Lint with flake8
+        run: |
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+      - name: Install pyroSAR
+        run: |
+          pip install .
+      - name: Test with pytest
+        run: |
+          coverage run -m pytest
+          coverage xml
+      - name: Publish to coveralls.io
+        if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: coverallsapp/github-action@v2.3.0
+        with:
+          github-token: ${{ github.token }}
+          format: cobertura
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up micromamba environment
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: environment-dev.yml
+          cache-environment: true
+          init-shell: bash
+          generate-run-shell: true
+          post-cleanup: 'all'
+
+      - uses: nyurik/action-setup-postgis@v2.2
+        with:
+          cached-dir: C:\downloads
+          postgres-version: 17
+
+      # ---------------- SNAP cache ----------------
+      - name: Cache SNAP zip
+        id: cache-snap
+        uses: actions/cache@v4
+        with:
+          path: |
+            snap.zip
+          key: snap-${{ env.SNAP_VERSION }}-windows
+
+      - name: Download and install SNAP (cache miss)
+        if: steps.cache-snap.outputs.cache-hit != 'true'
+        shell: cmd
+        run: |
+          echo Downloading SNAP installer...
+          curl -L -o snap.exe https://download.esa.int/step/snap/%SNAP_VERSION%/installers/esa-snap_all_windows-%SNAP_VERSION%.0.exe
+
+          echo Installing SNAP...
+          start /wait snap.exe -q -dir C:\esa-snap
+          
+          echo Creating zip archive for cache...
+          powershell Compress-Archive -Path C:\esa-snap -DestinationPath snap.zip
+
+      - name: Restore SNAP from zip (cache hit)
+        if: steps.cache-snap.outputs.cache-hit == 'true'
+        shell: powershell
+        run: |
+          Write-Host "Unzipping cached SNAP..."
+          Expand-Archive snap.zip C:\
+
+      - name: Add SNAP to PATH
+        shell: powershell
+        run: |
+          echo "C:\esa-snap\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      # ---------------- Python steps (micromamba env) ----------------
+
+      - name: Verify micromamba python
+        shell: bash -el {0}
+        run: |
+          where python
+          python -V
+          where pip
+
+      - name: Install pyroSAR
+        shell: bash -el {0}
+        run: |
+          python -m pip install .
+
+      - name: Setup tmate session (debug)
+        uses: mxschmitt/action-tmate@v3
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
+
+      - name: Test with pytest
+        shell: bash -el {0}
+        run: |
+          pytest -vv
+        env:
+          PGUSER: postgres
+          PGPASSWORD: postgres
