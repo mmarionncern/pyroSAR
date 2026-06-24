@@ -1224,6 +1224,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
     ############################################
     # TOPSAR-Deburst node configuration
     if process_S1_SLC and swaths is not None:
+        print("DEBURST=================================")
         deb = parse_node('TOPSAR-Deburst')
         workflow.insert_node(deb, before=last.id)
         deb.parameters['selectedPolarisations'] = polarizations
@@ -1519,7 +1520,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
                 p = Popen(['python', 'dynamicCOHCleaning.py', tmp_name])
 
             groups = groupbyWorkers(wf_name, groupsize)
-            gpt(wf_name, groups=groups, cleanup=cleanup, tmpdir=outname,
+            gpt(wf_name, groups=groups, cleanup=False, tmpdir=outname,
                 gpt_exceptions=gpt_exceptions, gpt_args=gpt_args,
                 removeS1BorderNoiseMethod=removeS1BorderNoiseMethod)
             writer(xmlfile=wf_name, outdir=outdir, basename_extensions=basename_extensions,
