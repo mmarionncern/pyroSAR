@@ -741,16 +741,10 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
                 exp['name'] = area
                 exp['type'] = 'float32'
                 exp['expression'] = expression
-<<<<<<< HEAD
-                exp['noDataValue'] = -1000
-
-                if len(refarea) > 1:
-=======
-                exp['noDataValue'] = 0.0
+                exp['noDataValue'] = -1000.
                 
                 # modify the bm_tc band merge node if it exists or create a new band merge node
                 if bm_tc is not None:
->>>>>>> 1297ec2d3a4ff59dca6df0dfa4c64f1629ae8471
                     bm_tc.source = bm_tc.source + [math.id]
                 else:
                     bm_tc = parse_node('BandMerge')
@@ -760,15 +754,9 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
                 # modify Terrain-Correction source bands
                 tc_bands = tc.parameters['sourceBands'] + ',' + area
                 tc.parameters['sourceBands'] = tc_bands
-<<<<<<< HEAD
-
-                # add scattering Area to list of band directly written from Terrain-Correction
-                tc_selection.append(area)
-=======
                 
                 # add scattering area to the list of bands directly written from Terrain-Correction
                 bands_extra.append(area)
->>>>>>> 1297ec2d3a4ff59dca6df0dfa4c64f1629ae8471
             elif item == 'gammaSigmaRatio':
                 if not terrainFlattening:
                     raise RuntimeError('gammaSigmaRatio can only be created if terrain flattening is performed')
@@ -777,54 +765,30 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
                                      "must contain both sigma0 and gamma0")
                 math = parse_node('BandMaths')
                 workflow.insert_node(math, before=tf.id, resetSuccessorSource=False)
-<<<<<<< HEAD
-
-                pol = polarizations[0]  # the result will be the same for each polarization
-                ratio = 'gammaSigmaRatio_{0}'.format(pol)
-                expression = 'Sigma0_{0} / Gamma0_{0}'.format(pol)
-
-=======
                 
                 ratio = 'gammaSigmaRatio_{0}'.format(pol_ref)
                 expression = 'Sigma0_{0} / Gamma0_{0}'.format(pol_ref)
                 
->>>>>>> 1297ec2d3a4ff59dca6df0dfa4c64f1629ae8471
                 math.parameters.clear_variables()
                 exp = math.parameters['targetBands'][0]
                 exp['name'] = ratio
                 exp['type'] = 'float32'
                 exp['expression'] = expression
-<<<<<<< HEAD
-                exp['noDataValue'] = -1000
-
-                if len(refarea) > 1:
-=======
-                exp['noDataValue'] = 0.0
+                exp['noDataValue'] = -1000.
                 
                 # modify the bm_tc band merge node if it exists or create a new band merge node
                 if bm_tc is not None:
->>>>>>> 1297ec2d3a4ff59dca6df0dfa4c64f1629ae8471
                     bm_tc.source = bm_tc.source + [math.id]
                 else:
                     bm_tc = parse_node('BandMerge')
                     workflow.insert_node(bm_tc, before=[tf.id, math.id], resetSuccessorSource=False)
                     tc.source = bm_tc.id
-<<<<<<< HEAD
-
-                # modify Terrain-Correction source bands
-                tc_bands = tc.parameters['sourceBands'] + ',' + ratio
-                tc.parameters['sourceBands'] = tc_bands
-
-                # add scattering Area to list of band directly written from Terrain-Correction
-                tc_selection.append(ratio)
-=======
                 
                 tc_bands = tc.parameters['sourceBands'] + ',' + ratio
                 tc.parameters['sourceBands'] = tc_bands
                 
                 # add scattering Area to the list of bands directly written from Terrain-Correction
                 bands_extra.append(ratio)
->>>>>>> 1297ec2d3a4ff59dca6df0dfa4c64f1629ae8471
             else:
                 raise RuntimeError("ID '{}' not valid for argument 'export_extra'".format(item))
         # directly write export_extra layers to avoid dB scaling
@@ -995,13 +959,8 @@ def noise_power(infile, outdir, polarizations, spacing, t_srs, refarea='sigma0',
         raise ValueError('refarea not supported')
 
     id = identify(infile)
-<<<<<<< HEAD
 
-    if id.sensor not in ['S1A', 'S1B']:
-=======
-    
     if id.sensor not in ['S1A', 'S1B', 'S1C', 'S1D']:
->>>>>>> 1297ec2d3a4ff59dca6df0dfa4c64f1629ae8471
         raise RuntimeError('this function is for Sentinel-1 only')
 
     os.makedirs(outdir, exist_ok=True)
