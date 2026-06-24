@@ -1890,7 +1890,8 @@ def halpha(infile, swaths=["IW1", "IW2", "IW3"], t_srs=4326, demName='SRTM 1Sec 
     # Multilook node configuration
     bands = None
     ml = mli_parametrize(scene=id, spacing=spacing, rlks=rlks, azlks=azlks,
-                         sourceBands=bands, outputIntensity=False)
+                         # sourceBands=bands,
+                         outputIntensity=False)
     if ml is not None:
         workflow.insert_node(ml, before=last.id)
         last = ml
