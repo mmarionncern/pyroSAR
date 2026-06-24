@@ -2055,12 +2055,7 @@ class SAFE(ID):
         --------
         :class:`pyroSAR.S1.OSV`
         """
-<<<<<<< HEAD
-
-        with S1.OSV(osvdir, timeout=timeout) as osv:
-=======
         with S1.OSV(osvdir=osvdir, timeout=timeout) as osv:
->>>>>>> 1297ec2d3a4ff59dca6df0dfa4c64f1629ae8471
             if useLocal:
                 matched = osv.match(sensor=self.sensor, timestamp=self.start,
                                     osvtype=osvType)
@@ -2086,16 +2081,9 @@ class SAFE(ID):
             osv.retrieve(files)
             
             if returnMatch:
-<<<<<<< HEAD
-                match = osv.match(sensor=self.sensor, timestamp=self.start,
-                                  osvtype=osvType)
-                return match
-
-=======
                 matched = osv.match(sensor=self.sensor, timestamp=self.start,
                                     osvtype=osvType)
                 return matched
->>>>>>> 1297ec2d3a4ff59dca6df0dfa4c64f1629ae8471
     
     def quicklook(
             self,
@@ -2219,12 +2207,7 @@ class SAFE(ID):
         self.meta['resolution'] = resolution_rg, resolution_az
         return self.meta['resolution']
     
-<<<<<<< HEAD
-    def scanMetadata(self):
-
-=======
     def scanMetadata(self) -> MetaDict:
->>>>>>> 1297ec2d3a4ff59dca6df0dfa4c64f1629ae8471
         with self.getFileObj(self.findfiles('manifest.safe')[0]) as input:
             manifest = input.getvalue()
 
