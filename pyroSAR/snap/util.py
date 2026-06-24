@@ -1119,10 +1119,9 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
     else:
         raise RuntimeError('polarizations must be of type str or list')
 
-    swaths = None
     if process_S1_SLC:
         if id.acquisition_mode == 'IW':
-            swaths = swaths  # ['IW1', 'IW2', 'IW3']
+            swaths = swaths # ['IW1', 'IW2', 'IW3']
         elif id.acquisition_mode == 'EW':
             swaths = ['EW1', 'EW2', 'EW3', 'EW4', 'EW5']
         elif re.search('S[1-6]', id.acquisition_mode):
@@ -1224,7 +1223,6 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
     ############################################
     # TOPSAR-Deburst node configuration
     if process_S1_SLC and swaths is not None:
-        print("DEBURST=================================")
         deb = parse_node('TOPSAR-Deburst')
         workflow.insert_node(deb, before=last.id)
         deb.parameters['selectedPolarisations'] = polarizations
@@ -1520,7 +1518,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
                 p = Popen(['python', 'dynamicCOHCleaning.py', tmp_name])
 
             groups = groupbyWorkers(wf_name, groupsize)
-            gpt(wf_name, groups=groups, cleanup=False, tmpdir=outname,
+            gpt(wf_name, groups=groups, cleanup=cleanup, tmpdir=outname,
                 gpt_exceptions=gpt_exceptions, gpt_args=gpt_args,
                 removeS1BorderNoiseMethod=removeS1BorderNoiseMethod)
             writer(xmlfile=wf_name, outdir=outdir, basename_extensions=basename_extensions,
