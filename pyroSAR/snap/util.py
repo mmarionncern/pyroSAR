@@ -1180,7 +1180,8 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
         if c1 or c2:
             cal.parameters['sourceBands'] = 'Intensity'
         else:
-            cal.parameters['sourceBands'] = [f'Amplitude_{x}' for x in polarizations]
+            if not process_S1_SLC:
+                cal.parameters['sourceBands'] = [f'Amplitude_{x}' for x in polarizations]
 
         cal.parameters['outputBetaBand'] = False
         cal.parameters['outputSigmaBand'] = False
