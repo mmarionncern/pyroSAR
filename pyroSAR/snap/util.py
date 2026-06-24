@@ -1248,7 +1248,7 @@ def geocode(infile, outdir, t_srs=4326, spacing=20, polarizations='all', shapefi
     #     bands = bandnames['beta0']
     # else:
     ml = mli_parametrize(scene=id, spacing=spacing, rlks=rlks,
-                         azlks=azlks, sourceBands=bands)
+                         azlks=azlks)  # , sourceBands=bands)
     if ml is not None:
         workflow.insert_node(ml, before=last.id)
         last = ml
