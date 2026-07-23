@@ -1748,7 +1748,7 @@ def halpha(infile, swaths=["IW1", "IW2", "IW3"], t_srs=4326, demName='SRTM 1Sec 
     ############################################
     # general setup
     process_S1_SLC = False
-    if id.sensor not in ['S1A', 'S1B', 'S1C'] or id.product != "SLC":
+    if id.sensor not in ['S1A', 'S1B', 'S1C', 'S1D'] or id.product != "SLC":
         raise RuntimeError('Insar coherence only available for Sentinel mission in SLC mode')
 
     formatName = 'SENTINEL-1'
