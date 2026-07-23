@@ -2040,8 +2040,8 @@ def insar_coherence(infiles, swaths=["IW1", "IW2", "IW3"], polarizations='all', 
 
     ############################################
     # general setup
-    if id_1.sensor not in ['S1A', 'S1B', 'S1C'] or id_1.product != "SLC" or\
-       id_2.sensor not in ['S1A', 'S1B', 'S1C'] or id_2.product != "SLC":
+    if id_1.sensor not in ['S1A', 'S1B', 'S1C', 'S1D'] or id_1.product != "SLC" or\
+       id_2.sensor not in ['S1A', 'S1B', 'S1C', 'S1D'] or id_2.product != "SLC":
         raise RuntimeError('Insar coherence only available for Sentinel mission in SLC mode')
 
     formatName = 'SENTINEL-1'
